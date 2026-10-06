@@ -1,0 +1,41 @@
+# Scenario report: yolo11n.pt
+
+| File | Scenario | Expected | Detected | Confidences | False positives | Missed |
+|---|---|---:|---:|---|---:|---:|
+| 0dfb0cb56b5f6f83.jpg | single cow, close-up | 1 | 1 | 0.914 | 0 | 0 |
+| 0e8d55f67017c922.jpg | one cow in front + two tiny distant cows (hillside pasture) | 3 | 2 | 0.948, 0.465 | 0 | 1 |
+| 04ce0bea454a0696.jpg | small group, close, overlapping | 3 | 3 | 0.847, 0.712, 0.388 | 0 | 0 |
+| 3b0552d633474d44.jpg | Holstein cows in a corral behind bars (partially hidden) | 3 | 1 | 0.470 | 0 | 2 |
+| b0130d2ec45bb2c9.jpg | several cows far away in a pasture | 3 | 2 | 0.963, 0.485 | 1 | 2 |
+| 37a8b48110db608f.jpg | dairy barn, cows partially hidden by railings | 2 | 3 | 0.407, 0.362, 0.361 | 1 | 0 |
+| 19d1c340dd7a4268.jpg | many cows, close and heavily overlapping | 8 | 3 | 0.882, 0.796, 0.446 | 0 | 5 |
+| 0d68f5133355b30a.jpg | night rodeo, artificial light, motion blur | 1 | 0 |  | 0 | 1 |
+| 224ad16181d9fb6b.jpg | two cows lying on grass (pasture) | 2 | 2 | 0.944, 0.937 | 0 | 0 |
+| 3c0b58255137d56a.jpg | Watusi breed lying down (long horns) | 2 | 1 | 0.940 | 0 | 1 |
+| e14f9b3b1fec79ef.jpg | Highland breed (long hair) | 2 | 1 | 0.971 | 0 | 1 |
+| f36578445371ad52.jpg | Holstein (black and white) in a corral | 1 | 1 | 0.890 | 0 | 0 |
+| 8d4f224faea5042a.jpg | very small bull far away in an arena | 1 | 1 | 0.616 | 0 | 0 |
+| 80cdec2f07849ce7.jpg | dark scene, cattle in a rodeo pen | 2 | 1 | 0.702 | 0 | 1 |
+| 16e30c3f32a91b17.jpg | negative: maned wolf, no cattle | 0 | 0 |  | 0 | 0 |
+| a1d71f6bc0d051ea.jpg | negative: dogs, no cattle | 0 | 0 |  | 0 | 0 |
+
+## Image credits
+
+| File | License | Author | Source URL |
+|---|---|---|---|
+| 0dfb0cb56b5f6f83.jpg | https://creativecommons.org/licenses/by/2.0/ | Vincent Lit | https://www.flickr.com/photos/v_lit/15644858645 |
+| 0e8d55f67017c922.jpg | https://creativecommons.org/licenses/by/2.0/ | Glen Bowman | https://www.flickr.com/photos/glenbowman/20826039598 |
+| 04ce0bea454a0696.jpg | https://creativecommons.org/licenses/by/2.0/ | Kate Ter Haar | https://www.flickr.com/photos/katerha/15047437635 |
+| 3b0552d633474d44.jpg | https://creativecommons.org/licenses/by/2.0/ | Jennifer Aitkens | https://www.flickr.com/photos/molajen/235093203 |
+| b0130d2ec45bb2c9.jpg | https://creativecommons.org/licenses/by/2.0/ | Simmy&#x27;s Photography | https://www.flickr.com/photos/simmysphotos/7443048154 |
+| 37a8b48110db608f.jpg | https://creativecommons.org/licenses/by/2.0/ | Yun Huang Yong | https://www.flickr.com/photos/goosmurf/108323980 |
+| 19d1c340dd7a4268.jpg | https://creativecommons.org/licenses/by/2.0/ | Richard | https://www.flickr.com/photos/dipfan/138260822 |
+| 0d68f5133355b30a.jpg | https://creativecommons.org/licenses/by/2.0/ | Battle Creek CVB | https://www.flickr.com/photos/battlecreekcvb/4101397312 |
+| 224ad16181d9fb6b.jpg | https://creativecommons.org/licenses/by/2.0/ | foshie | https://www.flickr.com/photos/foshie/1504459440 |
+| 3c0b58255137d56a.jpg | https://creativecommons.org/licenses/by/2.0/ | JWolff-STL | https://www.flickr.com/photos/jwolff-stl/10938939603 |
+| e14f9b3b1fec79ef.jpg | https://creativecommons.org/licenses/by/2.0/ | Menno Abbink | https://www.flickr.com/photos/7326811@N05/5036793880 |
+| f36578445371ad52.jpg | https://creativecommons.org/licenses/by/2.0/ | Emran Kassim | https://www.flickr.com/photos/emrank/3367354580 |
+| 8d4f224faea5042a.jpg | https://creativecommons.org/licenses/by/2.0/ | Photo and Share CC | https://www.flickr.com/photos/cc_photoshare/11030016493 |
+| 80cdec2f07849ce7.jpg | https://creativecommons.org/licenses/by/2.0/ | Peter Linehan | https://www.flickr.com/photos/p_linehan/7770865746 |
+| 16e30c3f32a91b17.jpg | https://creativecommons.org/licenses/by/2.0/ | Spencer Wright | https://www.flickr.com/photos/spencer77/4901282571 |
+| a1d71f6bc0d051ea.jpg | https://creativecommons.org/licenses/by/2.0/ | Les Chatfield | https://www.flickr.com/photos/elsie/3801236059 |
