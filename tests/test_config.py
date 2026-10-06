@@ -3,9 +3,17 @@ import pytest
 from smartcattle_ai import Settings
 
 
-def test_defaults():
+@pytest.mark.parametrize("weights_exist", [False, True])
+def test_defaults(monkeypatch, weights_exist):
+    from smartcattle_ai import config
+    from pathlib import Path
+
+    expected_path = Path(config.__file__).resolve().parents[1] / "models" / "cattle_yolo11n_best.pt"
+    original_is_file = Path.is_file
+    monkeypatch.setattr(Path, "is_file", lambda path: weights_exist if path == expected_path
+                        else original_is_file(path))
     settings = Settings()
-    assert settings.weights == "yolo11n.pt"
+    assert settings.weights == (str(expected_path) if weights_exist else "yolo11n.pt")
     assert settings.confidence == 0.35
     assert settings.iou == 0.5
     assert settings.imgsz == 640

@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 def _default_device() -> str:
@@ -10,9 +11,14 @@ def _default_device() -> str:
     return "0" if torch.cuda.is_available() else "cpu"
 
 
+def _default_weights() -> str:
+    weights = Path(__file__).resolve().parents[1] / "models" / "cattle_yolo11n_best.pt"
+    return str(weights) if weights.is_file() else "yolo11n.pt"
+
+
 @dataclass(frozen=True)
 class Settings:
-    weights: str = "yolo11n.pt"
+    weights: str = field(default_factory=_default_weights)
     confidence: float = 0.35
     iou: float = 0.5
     imgsz: int = 640
@@ -33,7 +39,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         classes = os.getenv("SMARTCATTLE_CLASSES", "cow")
         return cls(
-            weights=os.getenv("SMARTCATTLE_WEIGHTS", "yolo11n.pt"),
+            weights=os.getenv("SMARTCATTLE_WEIGHTS", _default_weights()),
             confidence=float(os.getenv("SMARTCATTLE_CONF", "0.35")),
             iou=float(os.getenv("SMARTCATTLE_IOU", "0.5")),
             imgsz=int(os.getenv("SMARTCATTLE_IMGSZ", "640")),
