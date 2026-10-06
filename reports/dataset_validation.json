@@ -1,40 +1,40 @@
 {
-  "total_images": 539,
-  "total_annotations": 1075,
+  "total_images": 404,
+  "total_annotations": 699,
   "classes_present": [
     "0"
   ],
   "splits": {
     "train": {
-      "images": 348,
-      "positives": 313,
-      "negatives": 35,
-      "annotations": 703,
+      "images": 264,
+      "positives": 227,
+      "negatives": 37,
+      "annotations": 454,
       "boxes_per_image": {
         "min": 0,
-        "mean": 2.0201149425287355,
-        "max": 23
-      }
-    },
-    "val": {
-      "images": 62,
-      "positives": 53,
-      "negatives": 9,
-      "annotations": 118,
-      "boxes_per_image": {
-        "min": 0,
-        "mean": 1.903225806451613,
+        "mean": 1.7196969696969697,
         "max": 16
       }
     },
-    "test": {
-      "images": 129,
-      "positives": 115,
-      "negatives": 14,
-      "annotations": 254,
+    "val": {
+      "images": 46,
+      "positives": 39,
+      "negatives": 7,
+      "annotations": 93,
       "boxes_per_image": {
         "min": 0,
-        "mean": 1.9689922480620154,
+        "mean": 2.0217391304347827,
+        "max": 14
+      }
+    },
+    "test": {
+      "images": 94,
+      "positives": 80,
+      "negatives": 14,
+      "annotations": 152,
+      "boxes_per_image": {
+        "min": 0,
+        "mean": 1.6170212765957446,
         "max": 8
       }
     }

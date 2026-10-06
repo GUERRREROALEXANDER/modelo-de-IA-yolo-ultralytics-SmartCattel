@@ -5,9 +5,10 @@
       "group": 36,
       "depiction": 7,
       "invalid_boxes": 0,
-      "rotated": 0
+      "rotated": 0,
+      "manual_review": 35
     },
-    "selected_positive": 115,
+    "selected_positive": 80,
     "selected_negative": 14
   },
   "source_test": {
@@ -16,25 +17,26 @@
       "group": 80,
       "depiction": 25,
       "invalid_boxes": 0,
-      "rotated": 2
+      "rotated": 2,
+      "manual_review": 100
     },
-    "selected_positive": 366,
+    "selected_positive": 266,
     "selected_negative": 44
   },
   "splits": {
     "train": {
-      "images": 348,
-      "positives": 313,
-      "negatives": 35
+      "images": 264,
+      "positives": 227,
+      "negatives": 37
     },
     "val": {
-      "images": 62,
-      "positives": 53,
-      "negatives": 9
+      "images": 46,
+      "positives": 39,
+      "negatives": 7
     },
     "test": {
-      "images": 129,
-      "positives": 115,
+      "images": 94,
+      "positives": 80,
       "negatives": 14
     }
   },
