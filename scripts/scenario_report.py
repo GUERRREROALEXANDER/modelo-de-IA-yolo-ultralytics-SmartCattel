@@ -16,7 +16,8 @@ from scripts.validate_dataset import parse_labels
 
 
 def report(manifest: Path, weights: str, output: Path) -> None:
-    detector = Detector(Settings(weights=weights))
+    # Scenario labels only contain cattle, so persons are excluded from the comparison.
+    detector = Detector(Settings(weights=weights, class_names=("cow",)))
     image_output = ROOT / "outputs" / "scenarios" / Path(weights).stem
     image_output.mkdir(parents=True, exist_ok=True)
     rows = []

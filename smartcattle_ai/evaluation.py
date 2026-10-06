@@ -1,17 +1,41 @@
-"""Comparable single-class cattle detection metrics for any YOLO class index."""
+"""Comparable detection metrics with dataset and model classes resolved by name."""
 
 from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
 from ultralytics.utils.metrics import ap_per_class, box_iou
 
 from .config import Settings
-from .detector import Detector
+from .model_loader import load_model
 from .media import read_image
 
 
 IOU_THRESHOLDS = np.linspace(0.5, 0.95, 10)
+
+
+def resolve_class_ids(names, class_names) -> dict[str, int]:
+    """Resolve semantic names independently of a dataset/model's class numbering."""
+    items = names.items() if isinstance(names, dict) else enumerate(names)
+    by_name = {name: int(class_id) for class_id, name in items}
+    missing = set(class_names) - by_name.keys()
+    if missing:
+        raise ValueError(f"Requested classes missing from names: {', '.join(sorted(missing))}")
+    return {name: by_name[name] for name in class_names}
+
+
+def ground_truth_by_name(label: Path, names, class_names, width: int, height: int) -> dict:
+    from scripts.validate_dataset import parse_labels
+
+    ids = resolve_class_ids(names, class_names)
+    allowed = [int(key) for key in names] if isinstance(names, dict) else range(len(names))
+    boxes, errors = parse_labels(label, allowed_classes=allowed)
+    if errors:
+        raise ValueError(errors[0])
+    classes = [int(line.split()[0]) for line in label.read_text(encoding="utf-8").splitlines()]
+    return {name: [xywh_to_xyxy(box, width, height) for class_id, box in zip(classes, boxes)
+                   if class_id == target_id] for name, target_id in ids.items()}
 
 
 def match_boxes(ground_truth: np.ndarray, predicted: np.ndarray) -> np.ndarray:
@@ -87,41 +111,56 @@ def evaluate(weights, data_yaml, split="test", conf=0.001, iou=0.6, imgsz=640,
         raise ValueError(f"Unknown split: {split}")
     if not 0 < conf <= operating_conf <= 1:
         raise ValueError("Require 0 < conf <= operating_conf <= 1")
-    from scripts.validate_dataset import dataset_paths, label_path, parse_labels
+    from scripts.validate_dataset import dataset_paths, label_path
 
+    if isinstance(class_names, str):
+        class_names = tuple(name.strip() for name in class_names.split(","))
+    class_names = tuple(dict.fromkeys(class_names))
+    if not class_names or any(not name for name in class_names):
+        raise ValueError("At least one nonempty class name is required")
+    config = yaml.safe_load(Path(data_yaml).read_text(encoding="utf-8"))
+    dataset_ids = resolve_class_ids(config["names"], class_names)
     directory = dataset_paths(Path(data_yaml))[split]
     images = sorted(path for path in directory.iterdir()
                     if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"})
     if not images:
         raise ValueError(f"No images in {directory}")
-    detector = Detector(Settings(weights=str(weights), confidence=conf, iou=iou,
-                                 imgsz=imgsz, class_names=tuple(class_names)))
-    class_ids = detector.class_ids
-    records, inference_ms = [], []
+    settings = Settings(weights=str(weights), confidence=conf, iou=iou,
+                        imgsz=imgsz, class_names=class_names)
+    model = load_model(str(weights))
+    model_ids = resolve_class_ids(model.names, class_names)
+    class_ids = list(model_ids.values())
+    records = {name: [] for name in class_names}
+    inference_ms = []
     for image in images:
         frame = read_image(image)
         height, width = frame.shape[:2]
         label = label_path(image)
         if not label.exists():
             raise ValueError(f"Missing label: {label}")
-        boxes, errors = parse_labels(label)
-        if errors:
-            raise ValueError(errors[0])
-        truth = [xywh_to_xyxy(box, width, height) for box in boxes]
-        result = detector._model.predict(frame, conf=conf, iou=iou, imgsz=imgsz,
-                                         classes=class_ids, device=detector.settings.device,
-                                         verbose=False)[0]
-        predictions, scores = [], []
-        for box in result.boxes:
-            if int(box.cls.item()) in class_ids:
-                predictions.append(box.xyxy[0].cpu().tolist())
-                scores.append(float(box.conf.item()))
-        records.append({"ground_truth": truth, "predictions": predictions,
-                        "confidences": scores})
+        truth = ground_truth_by_name(label, config["names"], class_names, width, height)
+        result = model.predict(frame, conf=conf, iou=iou, imgsz=imgsz,
+                               classes=class_ids, device=settings.device, verbose=False)[0]
+        for name, class_id in model_ids.items():
+            predictions, scores = [], []
+            for box in result.boxes:
+                if int(box.cls.item()) == class_id:
+                    predictions.append(box.xyxy[0].cpu().tolist())
+                    scores.append(float(box.conf.item()))
+            records[name].append({"ground_truth": truth[name], "predictions": predictions,
+                                  "confidences": scores})
         inference_ms.append(float(result.speed["inference"]))
-    metrics = summarize(records, operating_conf)
+    per_class = {name: summarize(items, operating_conf) for name, items in records.items()}
+    # Separate image/class records prevent matching a cow prediction to a person.
+    metrics = summarize([item for items in records.values() for item in items], operating_conf)
+    for key in ("precision", "recall", "mAP50", "mAP50-95"):
+        metrics[key] = sum(item[key] for item in per_class.values()) / len(per_class)
+    if len(class_names) > 1:
+        metrics["per_class"] = per_class
+        metrics["aggregation"] = "Macro AP/precision/recall; operating counts summed over image/class pairs"
     metrics.update({"weights": str(weights), "split": split, "images": len(images),
                     "conf": conf, "iou": iou, "imgsz": imgsz,
                     "class_names": list(class_names), "model_class_ids": class_ids,
+                    "dataset_class_ids": dataset_ids,
                     "mean_inference_ms_per_image": sum(inference_ms) / len(inference_ms)})
     return metrics

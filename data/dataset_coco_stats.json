@@ -1,0 +1,19 @@
+{
+  "splits": {
+    "train": {
+      "images": 264,
+      "cow_boxes": 454,
+      "person_boxes": 520
+    },
+    "val": {
+      "images": 46,
+      "cow_boxes": 93,
+      "person_boxes": 25
+    },
+    "test": {
+      "images": 94,
+      "cow_boxes": 152,
+      "person_boxes": 153
+    }
+  }
+}

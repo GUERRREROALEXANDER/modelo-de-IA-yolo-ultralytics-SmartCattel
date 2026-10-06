@@ -17,10 +17,14 @@ def main(argv=None) -> int:
     parser.add_argument("--split", choices=("train", "val", "test"), default="test")
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--operating-conf", type=float, default=0.35)
+    parser.add_argument("--classes", default="cow", help="Comma-separated class names, e.g. cow,person")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
+    class_names = tuple(name.strip() for name in args.classes.split(","))
+    if any(not name for name in class_names):
+        parser.error("--classes requires nonempty comma-separated class names")
     results = [evaluate(weight, args.data, split=args.split, imgsz=args.imgsz,
-                        operating_conf=args.operating_conf) for weight in args.weights]
+                        class_names=class_names, operating_conf=args.operating_conf) for weight in args.weights]
     print("| Weights | P | R | mAP50 | mAP50-95 | TP | FP | FN | Negative FP | Count MAE | ms/image |")
     print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for result in results:
