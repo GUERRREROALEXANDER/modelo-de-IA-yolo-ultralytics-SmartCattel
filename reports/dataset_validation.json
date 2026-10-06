@@ -1,0 +1,46 @@
+{
+  "total_images": 539,
+  "total_annotations": 1075,
+  "classes_present": [
+    "0"
+  ],
+  "splits": {
+    "train": {
+      "images": 348,
+      "positives": 313,
+      "negatives": 35,
+      "annotations": 703,
+      "boxes_per_image": {
+        "min": 0,
+        "mean": 2.0201149425287355,
+        "max": 23
+      }
+    },
+    "val": {
+      "images": 62,
+      "positives": 53,
+      "negatives": 9,
+      "annotations": 118,
+      "boxes_per_image": {
+        "min": 0,
+        "mean": 1.903225806451613,
+        "max": 16
+      }
+    },
+    "test": {
+      "images": 129,
+      "positives": 115,
+      "negatives": 14,
+      "annotations": 254,
+      "boxes_per_image": {
+        "min": 0,
+        "mean": 1.9689922480620154,
+        "max": 8
+      }
+    }
+  },
+  "duplicates": [],
+  "errors": [],
+  "warnings": [],
+  "valid": true
+}
