@@ -3,13 +3,19 @@ import numpy as np
 import pytest
 
 from smartcattle_ai.media import (
-    draw_detections, process_video, read_image, save_image,
+    draw_detections, process_image, process_video, read_image, save_image,
 )
 
 
 class FakeDetector:
     def detect(self, frame):
         return [{"class": "cow", "confidence": 0.91, "bbox": [2, 2, 20, 20]}]
+
+
+class MixedDetector:
+    def detect(self, frame):
+        return [{"class": "cow", "confidence": 0.91, "bbox": [2, 2, 20, 20]},
+                {"class": "person", "confidence": 0.85, "bbox": [25, 2, 45, 30]}]
 
 
 def test_image_path_with_spaces_and_accent(tmp_path):
@@ -33,6 +39,15 @@ def test_draw_does_not_change_frame():
     assert not frame.any()
 
 
+def test_process_image_counts_cattle_and_persons(tmp_path):
+    source = tmp_path / "mixed.jpg"
+    save_image(source, np.zeros((64, 64, 3), dtype=np.uint8))
+    result = process_image(MixedDetector(), source)
+    assert result["total_cattle"] == 1
+    assert result["total_persons"] == 1
+    assert len(result["detections"]) == 2
+
+
 def test_process_video_with_stride(tmp_path):
     source = tmp_path / "synthetic.mp4"
     writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"),
@@ -46,6 +61,9 @@ def test_process_video_with_stride(tmp_path):
     assert result["frames_processed"] == 5
     assert [item["frame"] for item in result["frames"]] == [1, 3, 5, 7, 9]
     assert result["max_cattle"] == result["avg_cattle"] == 1
+    assert result["total_cattle"] == 5
+    assert result["total_persons"] == result["max_persons"] == 0
+    assert all(item["total_persons"] == 0 for item in result["frames"])
     assert result["frames_with_cattle"] == 5
     output = cv2.VideoCapture(result["output"])
     try:

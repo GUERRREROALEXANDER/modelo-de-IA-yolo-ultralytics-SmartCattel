@@ -20,15 +20,23 @@ def read_image(path) -> np.ndarray:
     return frame
 
 
-def draw_detections(frame: np.ndarray, detections: list[dict]) -> np.ndarray:
+def draw_detections(frame: np.ndarray, detections: list[dict], zone=None) -> np.ndarray:
     annotated = frame.copy()
+    if zone is not None:
+        height, width = frame.shape[:2]
+        left, top, right, bottom = zone
+        cv2.rectangle(annotated, (round(left * width), round(top * height)),
+                      (round(right * width), round(bottom * height)), (255, 0, 0), 2)
     for detection in detections:
         x1, y1, x2, y2 = (int(round(value)) for value in detection["bbox"])
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        color = (0, 165, 255) if detection["class"] == "person" else (0, 255, 0)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
         label = f'{detection["class"]} {detection["confidence"]:.2f}'
         cv2.putText(annotated, label, (x1, max(y1 - 5, 12)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    cv2.putText(annotated, f"Cattle: {len(detections)}", (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+    cattle = sum(item["class"] == "cow" for item in detections)
+    persons = sum(item["class"] == "person" for item in detections)
+    cv2.putText(annotated, f"Cattle: {cattle} | Persons: {persons}", (10, 25),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     return annotated
 
@@ -47,7 +55,7 @@ def is_video(path) -> bool:
     return Path(path).suffix.lower() in VIDEO_EXTENSIONS
 
 
-def process_image(detector, path, output_dir=None) -> dict:
+def process_image(detector, path, output_dir=None, zone=None) -> dict:
     source = Path(path)
     frame = read_image(source)
     height, width = frame.shape[:2]
@@ -55,16 +63,18 @@ def process_image(detector, path, output_dir=None) -> dict:
     output = None
     if output_dir is not None:
         output = Path(output_dir) / f"{source.stem}_annotated{source.suffix}"
-        save_image(output, draw_detections(frame, detections))
+        save_image(output, draw_detections(frame, detections, zone))
     return {
         "source": str(source), "width": width, "height": height,
-        "total_cattle": len(detections), "detections": detections,
+        "total_cattle": sum(item["class"] == "cow" for item in detections),
+        "total_persons": sum(item["class"] == "person" for item in detections),
+        "detections": detections,
         "output": str(output) if output else None,
     }
 
 
 def process_video(detector, path, output_dir=None, vid_stride=1,
-                  max_frames=None, on_frame=None) -> dict:
+                  max_frames=None, on_frame=None, zone=None) -> dict:
     if vid_stride < 1:
         raise ValueError("vid_stride must be at least 1")
     if max_frames is not None and max_frames < 1:
@@ -89,7 +99,10 @@ def process_video(detector, path, output_dir=None, vid_stride=1,
                 continue
             height, width = frame.shape[:2]
             detections = detector.detect(frame)
-            item = {"frame": frames_read, "total_cattle": len(detections),
+            item = {"frame": frames_read, "time_s": (frames_read - 1) / fps,
+                    "width": width, "height": height,
+                    "total_cattle": sum(item["class"] == "cow" for item in detections),
+                    "total_persons": sum(item["class"] == "person" for item in detections),
                     "detections": detections}
             frames.append(item)
             if on_frame is not None:
@@ -102,13 +115,16 @@ def process_video(detector, path, output_dir=None, vid_stride=1,
                                              fps / vid_stride, (width, height))
                     if not writer.isOpened():
                         raise ValueError(f"Could not write video: {output}")
-                writer.write(draw_detections(frame, detections))
+                writer.write(draw_detections(frame, detections, zone))
         counts = [item["total_cattle"] for item in frames]
+        person_counts = [item["total_persons"] for item in frames]
         return {
             "source": str(source), "frames_read": frames_read,
             "frames_processed": len(frames), "fps": fps,
             "width": width, "height": height,
+            "total_cattle": sum(counts), "total_persons": sum(person_counts),
             "max_cattle": max(counts, default=0),
+            "max_persons": max(person_counts, default=0),
             "avg_cattle": sum(counts) / len(counts) if counts else 0.0,
             "frames_with_cattle": sum(count > 0 for count in counts),
             "output": str(output) if output else None, "frames": frames,
