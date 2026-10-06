@@ -1,0 +1,42 @@
+{
+  "source_validation": {
+    "cattle_images": 158,
+    "exclusions": {
+      "group": 36,
+      "depiction": 7,
+      "invalid_boxes": 0,
+      "rotated": 0
+    },
+    "selected_positive": 115,
+    "selected_negative": 14
+  },
+  "source_test": {
+    "cattle_images": 472,
+    "exclusions": {
+      "group": 80,
+      "depiction": 25,
+      "invalid_boxes": 0,
+      "rotated": 2
+    },
+    "selected_positive": 366,
+    "selected_negative": 44
+  },
+  "splits": {
+    "train": {
+      "images": 348,
+      "positives": 313,
+      "negatives": 35
+    },
+    "val": {
+      "images": 62,
+      "positives": 53,
+      "negatives": 9
+    },
+    "test": {
+      "images": 129,
+      "positives": 115,
+      "negatives": 14
+    }
+  },
+  "failed_or_corrupt": []
+}
