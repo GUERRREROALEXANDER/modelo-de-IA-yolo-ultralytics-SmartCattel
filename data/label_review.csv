@@ -1,0 +1,136 @@
+image_id,split,decision,reason
+0b7fa9b3bb291bd3,test,exclude,bison
+1445fa691a804dc2,test,exclude,water buffalo
+178a83688c532568,test,exclude,african/cape buffalo
+1eb8d0a8e5ca2681,test,exclude,bison
+1f860f31115ed8bb,test,exclude,water buffalo
+1fca4e8814de1ef8,test,exclude,antelope/deer/wild ungulate
+270014837523e494,test,exclude,sheep
+284f821bec7df36b,test,exclude,bison
+3430425f3269b66e,test,exclude,yak
+35af5c348f913f0b,test,exclude,bison
+364bc47890f68a2c,test,exclude,goat
+48f79081769b86d4,test,exclude,goat
+4a9311443a33f485,test,exclude,bison
+5062a3ff888a580a,test,exclude,water buffalo
+6087895e5aee45b6,test,exclude,goat
+60c1462011836793,test,exclude,water buffalo
+65924623968e80ed,test,exclude,goat
+694fae862931296e,test,exclude,african/cape buffalo
+6e6f4713ba2e1b03,test,exclude,yak
+77f1ce5dd3b7d6eb,test,exclude,water buffalo
+8b3ea7f244658059,test,exclude,african/cape buffalo
+abc1b2539b4bdaa7,test,exclude,gaur
+ae5c4286b18d8ed6,test,exclude,yak
+af930390e202a313,test,exclude,bison
+b609de889b406f73,test,exclude,water buffalo
+b616d2befceab9a8,test,exclude,sheep
+b8ce3d5463ee2434,test,exclude,water buffalo
+bb1d4f67c6188864,test,exclude,bison
+bba7b3c966713383,test,exclude,water buffalo
+c1a66fd0d64e5246,test,exclude,bison
+c688e4d09590ef96,test,exclude,water buffalo
+ef37ee1ccb9ee712,test,exclude,water buffalo
+f7e2a754b421ed04,test,exclude,bison
+f89ff5d9886934c9,test,exclude,goat
+fc1bfe886053765a,test,exclude,african/cape buffalo
+04d9cced0dd42e6c,train,exclude,water buffalo
+053ab9bcb0f05d96,train,exclude,sheep
+089cef3acc866627,train,exclude,water buffalo
+1e7524c76e9b6f7b,train,exclude,yak
+1e9be10cb23df23a,train,exclude,african/cape buffalo
+1fe7a99c23f64885,train,exclude,goat
+203b7cfdabfc70f8,train,exclude,bison
+2732237e2db1b12e,train,exclude,antelope/deer/wild ungulate
+284c4d158b331f31,train,exclude,african/cape buffalo
+3120dc28effd89b7,train,exclude,bison
+347c40ab10051661,train,exclude,african/cape buffalo
+36b9526376fece8a,train,exclude,water buffalo
+3c2848073370c6ac,train,exclude,water buffalo
+3f48de9fc0ac6c7c,train,exclude,yak
+454b63eed80cdea5,train,exclude,sheep
+45b3eb40d95f2e81,train,exclude,sheep
+45b88fb978d91d15,train,exclude,yak
+4aed7e60e6578bbd,train,exclude,depiction (art/illustration)
+4e4385fd5c7b37eb,train,exclude,yak
+52c1444f43fb1fdc,train,exclude,water buffalo
+5365fdeefa3bb8a0,train,exclude,water buffalo
+53af58f3d39c9a7c,train,exclude,african/cape buffalo
+5543c8154cad5b80,train,exclude,water buffalo
+591f0f9c5c0dade6,train,exclude,african/cape buffalo
+5ba9cb0d0289bc9c,train,exclude,bison
+5eb01f9bdae4a5d3,train,exclude,bison
+601b6b630cd4d90f,train,exclude,single box covers a herd (non-exhaustive labels)
+63b4de1130a1ce25,train,exclude,sheep
+67cb4d8750ad13a3,train,exclude,goat
+6800bfecec8b98d8,train,exclude,gaur
+680597fc57d29159,train,exclude,water buffalo
+6870ab795f3fb742,train,exclude,sheep
+6944532c45b779a4,train,exclude,bison
+69ba5e35347bd4ee,train,exclude,water buffalo
+734db6fb9b4707a0,train,exclude,depiction (art/illustration)
+736865256b6733d5,train,exclude,goat
+746f0d77045a4629,train,exclude,water buffalo
+74b8a8da46a94023,train,exclude,bison
+788d8ef42e204654,train,exclude,antelope/deer/wild ungulate
+79325c50d79233f7,train,exclude,sheep
+7c203c3f10e544ff,train,exclude,african/cape buffalo
+821fdbeca42a98a1,train,exclude,african/cape buffalo
+831b342987fd22ca,train,exclude,water buffalo
+8bfa7021d75746ce,train,exclude,ambiguous species
+8d373d638e47e9a2,train,exclude,bison
+8fe63c92fc803e09,train,exclude,african/cape buffalo
+92ba71b3121dd881,train,exclude,african/cape buffalo
+93b9383853d5f6c6,train,exclude,water buffalo
+98727e4187d609e1,train,exclude,ambiguous species
+9ad81ca183309dd2,train,exclude,goat
+9c1447acfdaa5f1a,train,exclude,african/cape buffalo
+9c53ba2dcc734b28,train,exclude,yak
+a2744efa4d6f1b2b,train,exclude,ambiguous species
+a6bef3cdf8513eeb,train,exclude,sheep
+a90f760ecad86ac8,train,exclude,bison
+a9dbaa2ef7acda02,train,exclude,water buffalo
+adc6cb08fcafcf77,train,exclude,ambiguous species
+b14d827d821c1d9e,train,exclude,water buffalo
+b277b668bf96404c,train,exclude,yak
+b45f0e088ba581f2,train,exclude,yak
+bd4ad102b75e74e8,train,exclude,yak
+c07d851439073801,train,exclude,antelope/deer/wild ungulate
+c1b64e7fb373e00b,train,exclude,african/cape buffalo
+c436f84503ffbdb2,train,exclude,goat
+c710e24b4ab73c24,train,exclude,goat
+ceaf494efef3dfef,train,exclude,yak
+cf00bb93f2b9bde3,train,exclude,ambiguous species
+cf0959c25eb37bd2,train,exclude,goat
+d041792794f559c0,train,exclude,african/cape buffalo
+d221ea3d73f48467,train,exclude,antelope/deer/wild ungulate
+d23d57853fd7278d,train,exclude,bison
+d339c39a4c501b18,train,exclude,water buffalo
+decf2bf215b7066b,train,exclude,antelope/deer/wild ungulate
+e4b15d99c00bf127,train,exclude,gaur
+e568b5df8eac5650,train,exclude,goat
+e7d6b1b8c652430a,train,exclude,goat
+edbfbac487f4147f,train,exclude,antelope/deer/wild ungulate
+f0f06588c68d04da,train,exclude,african/cape buffalo
+f13195fc3efbb2bd,train,exclude,ambiguous species
+f4fd263742e8f5fd,train,exclude,sheep
+f601ceded1bf3780,train,exclude,sheep
+f9a79f50fb1ef874,train,exclude,depiction (art/illustration)
+fae64f607e054aba,train,exclude,water buffalo
+fe438b6c53fed113,train,exclude,gaur
+0c805afd8718c328,val,exclude,water buffalo
+240d2e0a9b4cc7b0,val,exclude,bison
+29dc47138fedf7e8,val,exclude,antelope/deer/wild ungulate
+30d58f7a4d6f0943,val,exclude,antelope/deer/wild ungulate
+36296aefe846a82e,val,exclude,yak
+3e37fdef983faef3,val,exclude,sheep
+3ebecb5d7dd0dc1d,val,exclude,african/cape buffalo
+52772cb60ec8b604,val,exclude,sheep
+56532d6cffe0c917,val,exclude,water buffalo
+5cd75133d345dac5,val,exclude,water buffalo
+607c31e91bbcbd55,val,exclude,goat
+79a5b1614a2dd857,val,exclude,yak
+7da4e355186ce058,val,exclude,antelope/deer/wild ungulate
+8fe2a481df8539eb,val,exclude,goat
+9e000b8310939502,val,exclude,bison
+e3c70de5d47784ab,val,exclude,african/cape buffalo

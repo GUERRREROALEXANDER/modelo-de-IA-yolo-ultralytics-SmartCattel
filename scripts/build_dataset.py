@@ -93,6 +93,15 @@ def yolo_box(row: dict) -> tuple[float, float, float, float] | None:
     return ((left + right) / 2, (top + bottom) / 2, width, height)
 
 
+def load_review() -> set[str]:
+    """Image IDs excluded after visual review (see data/label_review.csv)."""
+    path = ROOT / "data" / "label_review.csv"
+    if not path.exists():
+        return set()
+    with path.open(newline="", encoding="utf-8") as stream:
+        return {row["image_id"] for row in csv.DictReader(stream) if row["decision"] == "exclude"}
+
+
 def collect(split: str, limit: int | None) -> tuple[list[dict], dict]:
     cattle = defaultdict(list)
     background = set()
@@ -136,6 +145,10 @@ def collect(split: str, limit: int | None) -> tuple[list[dict], dict]:
     rotated = [item for item in selected if item["metadata"]["Rotation"] not in ("", "0.0")]
     exclusions["rotated"] = len(rotated)
     selected = [item for item in selected if item not in rotated]
+    # Manual review: Open Images "Cattle" also tags bison, buffalo, yaks, goats and sheep.
+    reviewed = load_review()
+    exclusions["manual_review"] = sum(item["image_id"] in reviewed for item in selected)
+    selected = [item for item in selected if item["image_id"] not in reviewed]
     return selected, {"cattle_images": len(cattle), "exclusions": exclusions,
                       "selected_positive": sum(item["role"] == "positive" for item in selected),
                       "selected_negative": sum(item["role"] == "negative" for item in selected)}
