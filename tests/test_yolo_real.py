@@ -10,10 +10,10 @@ from smartcattle_ai.media import read_image
 @pytest.mark.real
 def test_real_yolo_on_bus_image():
     frame = read_image(ASSETS / "bus.jpg")
-    cow_detector = Detector(Settings(device="cpu"))
-    assert isinstance(cow_detector.detect(frame), list)
-    people_detector = Detector(Settings(class_names=("person", "bus"), device="cpu"))
-    assert any(item["class"] == "person" for item in people_detector.detect(frame))
+    detector = Detector(Settings(device="cpu"))
+    detections = detector.detect(frame)
+    assert any(item["class"] == "person" for item in detections)
+    assert all(item["class"] in {"cow", "person"} for item in detections)
 
 
 @pytest.mark.real
