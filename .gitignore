@@ -1,0 +1,10 @@
+__pycache__/
+*.pt
+runs/
+outputs/
+datasets/
+data/raw/
+.pytest_cache/
+outputs/*.mp4
+venv/
+.uv-cache/
