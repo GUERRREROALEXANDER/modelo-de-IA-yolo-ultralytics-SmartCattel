@@ -49,6 +49,7 @@ def main(argv=None):
     for key in ("epochs", "batch", "imgsz"):
         parser.add_argument(f"--{key}", type=int)
     parser.add_argument("--name")
+    parser.add_argument("--weights-out", type=Path, default=Path("models/cattle_yolo11n_best.pt"))
     parser.add_argument("--fraction", type=float, help="Fraction of training data for a debug run")
     args = parser.parse_args(argv)
 
@@ -89,7 +90,7 @@ def main(argv=None):
     best = run_dir / "weights" / "best.pt"
     if not best.is_file():
         raise FileNotFoundError(f"Training finished without best weights: {best}")
-    weights = ROOT / "models" / "cattle_yolo11n_best.pt"
+    weights = args.weights_out if args.weights_out.is_absolute() else ROOT / args.weights_out
     weights.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(best, weights)
 
@@ -103,7 +104,7 @@ def main(argv=None):
                                           project=cfg["project"], name=f'{cfg["name"]}_test',
                                           exist_ok=True)
 
-    training_reports = ROOT / "reports" / "training"
+    training_reports = ROOT / "reports" / "training" / run_dir.name
     training_reports.mkdir(parents=True, exist_ok=True)
     for name in ("results.csv", "results.png"):
         shutil.copy2(run_dir / name, training_reports / name)
@@ -117,7 +118,7 @@ def main(argv=None):
         "training_duration_seconds": duration,
         "best_pt": str(best),
     }
-    report_path = ROOT / "reports" / "finetuned_training.json"
+    report_path = ROOT / "reports" / f"{run_dir.name}.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"Saved weights: {weights}")
     print(f"Saved report: {report_path}")

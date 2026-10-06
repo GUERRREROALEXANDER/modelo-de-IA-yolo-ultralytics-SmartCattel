@@ -1,0 +1,34 @@
+[
+  {
+    "precision": 0.5144787415032983,
+    "recall": 0.5555555555555556,
+    "mAP50": 0.4859778909589957,
+    "mAP50-95": 0.3003668907344267,
+    "operating_conf": 0.35,
+    "operating": {
+      "TP": 85,
+      "FP": 79,
+      "FN": 68,
+      "precision": 0.5182926829268293,
+      "recall": 0.5555555555555556,
+      "false_positives_on_negative_images": 21,
+      "mean_absolute_count_error": 0.9680851063829787
+    },
+    "weights": "yolo11n.pt",
+    "split": "test",
+    "images": 94,
+    "conf": 0.001,
+    "iou": 0.6,
+    "imgsz": 640,
+    "class_names": [
+      "person"
+    ],
+    "model_class_ids": [
+      0
+    ],
+    "dataset_class_ids": {
+      "person": 0
+    },
+    "mean_inference_ms_per_image": 209.1768095754347
+  }
+]

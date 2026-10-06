@@ -36,16 +36,18 @@ def label_path(image: Path) -> Path:
     return Path(*parts).with_suffix(".txt")
 
 
-def parse_labels(path: Path) -> tuple[list[tuple[float, ...]], list[str]]:
+def parse_labels(path: Path, allowed_classes=(0,)) -> tuple[list[tuple[float, ...]], list[str]]:
     boxes, errors = [], []
+    allowed = {str(class_id) for class_id in allowed_classes}
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         fields = line.split()
         location = f"{path}:{line_number}"
         if len(fields) != 5:
             errors.append(f"Malformed label line: {location}")
             continue
-        if fields[0] != "0":
-            errors.append(f"Class ID other than 0: {location}")
+        if fields[0] not in allowed:
+            message = "Class ID other than 0" if allowed == {"0"} else f"Class ID not in {sorted(allowed)}"
+            errors.append(f"{message}: {location}")
         try:
             values = tuple(float(value) for value in fields[1:])
         except ValueError:
@@ -70,7 +72,7 @@ def dhash(frame) -> int:
     return value
 
 
-def validate(data_yaml: Path, report_path: Path | None = None) -> dict:
+def validate(data_yaml: Path, report_path: Path | None = None, allowed_classes=(0,)) -> dict:
     paths = dataset_paths(data_yaml)
     errors, warnings, records = [], [], []
     stats = {}
@@ -98,7 +100,7 @@ def validate(data_yaml: Path, report_path: Path | None = None) -> dict:
             label = label_path(image)
             boxes = []
             if label.exists():
-                boxes, label_errors = parse_labels(label)
+                boxes, label_errors = parse_labels(label, allowed_classes)
                 errors.extend(label_errors)
                 for line in label.read_text(encoding="utf-8").splitlines():
                     if line.split():
@@ -155,8 +157,15 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=ROOT / "datasets" / "cattle" / "data.yaml")
     parser.add_argument("--out", type=Path, default=ROOT / "reports" / "dataset_validation.json")
+    parser.add_argument("--allowed-classes", default="0", help="Comma-separated integer class IDs")
     args = parser.parse_args(argv)
-    report = validate(args.data, args.out)
+    try:
+        allowed_classes = tuple(int(value.strip()) for value in args.allowed_classes.split(","))
+        if any(value < 0 for value in allowed_classes):
+            raise ValueError
+    except ValueError:
+        parser.error("--allowed-classes must be a comma-separated list of nonnegative integers")
+    report = validate(args.data, args.out, allowed_classes)
     print_report(report)
     return 0 if report["valid"] else 1
 
