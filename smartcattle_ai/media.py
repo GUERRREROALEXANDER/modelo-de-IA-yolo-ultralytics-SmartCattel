@@ -29,9 +29,10 @@ def draw_detections(frame: np.ndarray, detections: list[dict], zone=None) -> np.
                       (round(right * width), round(bottom * height)), (255, 0, 0), 2)
     for detection in detections:
         x1, y1, x2, y2 = (int(round(value)) for value in detection["bbox"])
-        color = (0, 165, 255) if detection["class"] == "person" else (0, 255, 0)
+        outside = detection.get("inside_zone") is False
+        color = (0, 0, 255) if outside else (0, 165, 255) if detection["class"] == "person" else (0, 255, 0)
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-        label = f'{detection["class"]} {detection["confidence"]:.2f}'
+        label = f'{detection["class"]} {detection["confidence"]:.2f}' + (" OUT" if outside else "")
         cv2.putText(annotated, label, (x1, max(y1 - 5, 12)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     cattle = sum(item["class"] == "cow" for item in detections)
