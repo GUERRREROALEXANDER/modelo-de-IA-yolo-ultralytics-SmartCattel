@@ -364,7 +364,9 @@ python live.py                                          # camera + YOLO + video 
 powershell -ExecutionPolicy Bypass -File scripts\start_local.ps1   # backend, live.py and frontend together
 ```
 
-The frontend reads `VITE_AI_SERVICE_URL` (default setup: `http://localhost:8090`). The service runs on the PC that shares the camera's network; a hosted frontend can only show the video in a browser that can reach this PC. Test the model on footage from this camera before relying on its counts.
+`python live.py --tunnel` (or `SMARTCATTLE_LIVE_TUNNEL=1`) also starts a Cloudflare quick tunnel (`cloudflared` on PATH, in `%LOCALAPPDATA%\cloudflared\`, or `SMARTCATTLE_CLOUDFLARED`) and reports its `https://*.trycloudflare.com` URL to the backend as the camera's `stream_url`, so a hosted frontend finds the video without a rebuild. The URL changes on every start, and anyone who has it can watch the camera. `--public-url` reports a fixed URL instead.
+
+The frontend uses the camera's `stream_url` from the backend and falls back to `VITE_AI_SERVICE_URL` (default setup: `http://localhost:8090`). The service runs on the PC that shares the camera's network; a hosted frontend can only show the video in a browser that can reach this PC. Test the model on footage from this camera before relying on its counts.
 
 ## Credits and licenses
 
