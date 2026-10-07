@@ -2,6 +2,7 @@
 
 import json
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
@@ -17,7 +18,7 @@ class BackendClient:
         self.api_key = api_key
         self.timeout = timeout
 
-    def _request(self, path: str, payload: dict | None = None) -> tuple[int, dict]:
+    def _request(self, path: str, payload: dict | None = None, method: str | None = None) -> tuple[int, dict]:
         headers = {}
         data = None
         if payload is not None:
@@ -25,7 +26,7 @@ class BackendClient:
             data = json.dumps(payload).encode("utf-8")
             if self.api_key is not None:
                 headers["X-API-Key"] = self.api_key
-        request = Request(self.base_url + path, data=data, headers=headers)
+        request = Request(self.base_url + path, data=data, headers=headers, method=method)
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 return response.status, json.load(response)
@@ -48,6 +49,10 @@ class BackendClient:
         status, response = self._request("/api/ai/events", event)
         if status != 201:
             raise BackendError(f"Backend returned HTTP {status}; expected 201", status)
+        return response
+
+    def report_camera_status(self, camera_id: str, report: dict) -> dict:
+        _, response = self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/status", report, "PUT")
         return response
 
 
