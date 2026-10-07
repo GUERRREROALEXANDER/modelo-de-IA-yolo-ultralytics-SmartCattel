@@ -14,6 +14,7 @@ from smartcattle_ai.live import (
 )
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
 from smartcattle_ai.stream import CameraStream, camera_url_from_env, redact_url
+from smartcattle_ai.tunnel import QuickTunnel, find_cloudflared
 
 
 def main(argv=None) -> int:
@@ -29,6 +30,10 @@ def main(argv=None) -> int:
     parser.add_argument("--port", type=int, default=int(os.getenv("SMARTCATTLE_LIVE_PORT") or 8090))
     parser.add_argument("--origins", default=os.getenv("SMARTCATTLE_LIVE_ORIGINS") or ",".join(DEFAULT_ORIGINS),
                         help="Comma-separated frontend origins allowed to read /status")
+    parser.add_argument("--public-url", default=os.getenv("SMARTCATTLE_LIVE_PUBLIC_URL") or None,
+                        help="URL where browsers reach this server; reported to the backend")
+    parser.add_argument("--tunnel", action="store_true", default=os.getenv("SMARTCATTLE_LIVE_TUNNEL") == "1",
+                        help="Publish the video through a Cloudflare quick tunnel (anyone with the URL can watch)")
     args = parser.parse_args(argv)
 
     try:
@@ -42,7 +47,7 @@ def main(argv=None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    state = LiveState(args.camera_id, zone)
+    state = LiveState(args.camera_id, zone, args.public_url.rstrip("/") if args.public_url else None)
     stop = Event()
     frames = LatestFrame()
     # Short backoff so a camera that comes back is picked up within seconds.
@@ -71,12 +76,29 @@ def main(argv=None) -> int:
     except OSError as exc:
         print(f"Error: cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
+    tunnel = None
+    if args.tunnel:
+        executable = find_cloudflared()
+        if executable is None:
+            print("Error: --tunnel needs cloudflared (PATH, SMARTCATTLE_CLOUDFLARED or "
+                  "%LOCALAPPDATA%\\cloudflared\\cloudflared.exe)", file=sys.stderr)
+            server.server_close()
+            return 1
+        tunnel = QuickTunnel(server.server_address[1], executable)
+        try:
+            state.public_url = tunnel.start()
+        except (RuntimeError, OSError) as exc:
+            print(f"Error: tunnel failed: {exc}", file=sys.stderr)
+            server.server_close()
+            return 1
     for worker in workers:
         worker.start()
     base = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}"
     print(f"Camera {args.camera_id}: {redact_url(url)}")
     print(f"Backend: {args.backend_url or 'disabled'}")
     print(f"Video: {base}/video.mjpg  Status: {base}/status  (Ctrl+C to stop)")
+    if state.public_url:
+        print(f"Public video: {state.public_url}/video.mjpg")
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
@@ -85,6 +107,8 @@ def main(argv=None) -> int:
         stop.set()
         stream.stop()
         server.server_close()
+        if tunnel is not None:
+            tunnel.stop()
         if client is not None:
             # Lets the frontend drop the camera now instead of after the backend's offline timeout.
             try:

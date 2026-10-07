@@ -41,9 +41,11 @@ class LatestFrame:
 class LiveState:
     """Latest annotated JPEG and detections, shared by the worker and every HTTP client."""
 
-    def __init__(self, camera_id: str, zone: tuple):
+    def __init__(self, camera_id: str, zone: tuple, public_url: str | None = None):
         self.camera_id = camera_id
         self.zone = zone
+        # Base URL where browsers reach this server (e.g. a tunnel); reported to the backend while online.
+        self.public_url = public_url
         self._cond = Condition()
         self._seq = 0
         self._jpeg = None
@@ -142,6 +144,8 @@ def status_report(state: LiveState) -> dict | None:
     report: dict = {"status": status, "observed_at": datetime.now(timezone.utc).isoformat()}
     if status == "error":
         report["error"] = (error or "Stream error")[:300]
+    elif state.public_url:
+        report["stream_url"] = state.public_url
     if snapshot["width"]:
         report["frame_width"], report["frame_height"] = snapshot["width"], snapshot["height"]
     if snapshot["fps"]:
