@@ -343,11 +343,28 @@ The first command runs the whole suite (74 tests), **including** tests marked `r
 - **Unusual breeds.** Watusi and Highland cattle are each detected only 1 of 2 times.
 - **No tracking.** Video totals count the same animal in every frame; there is no identity, so throttling is per camera, not per animal.
 - **CPU speed.** About 60–100 ms per frame at 640 px on the recorded CPU, so a live stream needs frame skipping (`--vid-stride`).
-- **Inputs.** `detect.py` requires an existing file or folder; it does not yet accept a camera index or a stream URL. `smartcattle_ai/camera.py` already reads any OpenCV source (index, file, or URL) and prints detections, but it is not wired to the CLI, annotation, or backend events.
+- **Inputs.** `detect.py` requires an existing file or folder; the live camera goes through `live.py` instead.
 
-## Next step: live camera
+## Live camera
 
-The planned source is an IMOU Ranger 2 Pro 3MP camera. The inference side is ready to accept its frames: `Detector.detect(frame)` takes any OpenCV BGR frame and the default model loads automatically. What remains is input plumbing, not model work: let `detect.py --source` accept the camera's stream URL, read it with OpenCV (as `camera.py` does), and reuse the existing annotation, stride, and backend event code for frames from that stream. Test the model on footage from that camera before relying on its counts.
+`live.py` reads the IMOU camera over RTSP (credentials from `.env`, see `.env.example`), runs the detector on the newest frame only (about 10 FPS on CPU), and serves on `http://localhost:8090`:
+
+| Path | Content |
+| --- | --- |
+| `/video.mjpg` | MJPEG video with boxes and the safe zone drawn in; cows outside the zone are red. |
+| `/status` | Camera state, frame size, FPS and the latest detections (pixel boxes, `inside_zone`). |
+| `/snapshot.jpg` | Latest annotated frame. |
+| `/health` | `{"status":"ok"}` |
+
+With `SMARTCATTLE_BACKEND_URL` set it reports the camera status every 15 s (`PUT /api/ai/cameras/{id}/status`) and posts out-of-zone events, at most one per `--event-cooldown` seconds. A backend that is down does not stop the video. `/status` allows CORS only from `SMARTCATTLE_LIVE_ORIGINS` (default: local Vite ports). It listens on `127.0.0.1` unless `--host 0.0.0.0` is given.
+
+```powershell
+python probe_camera.py --duration 10 --reconnect-test   # check the stream first
+python live.py                                          # camera + YOLO + video server
+powershell -ExecutionPolicy Bypass -File scripts\start_local.ps1   # backend, live.py and frontend together
+```
+
+The frontend reads `VITE_AI_SERVICE_URL` (default setup: `http://localhost:8090`). The service runs on the PC that shares the camera's network; a hosted frontend can only show the video in a browser that can reach this PC. Test the model on footage from this camera before relying on its counts.
 
 ## Credits and licenses
 
