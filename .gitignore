@@ -9,3 +9,4 @@ data/raw/
 outputs/*.mp4
 venv/
 .uv-cache/
+.env
