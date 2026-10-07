@@ -25,5 +25,6 @@ python scripts/train.py --config configs/train_cattle.yaml --weights-out models/
 ```
 
 Its original best checkpoint stays at `runs/cattle/yolo11n_finetune/weights/best.pt`.
-Default selection tries the recommended checkpoint, then the single-class
-checkpoint, then `yolo11n.pt`. `SMARTCATTLE_WEIGHTS` overrides this selection.
+Default selection uses `cattle_coco_yolo11n_best.pt` when it exists and pretrained
+`yolo11n.pt` otherwise; the single-class checkpoint is never chosen automatically.
+`SMARTCATTLE_WEIGHTS` or `--weights` overrides this selection.

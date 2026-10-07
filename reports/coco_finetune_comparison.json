@@ -1,0 +1,142 @@
+[
+  {
+    "precision": 0.6767813952278564,
+    "recall": 0.569381002398593,
+    "mAP50": 0.5556976258381451,
+    "mAP50-95": 0.41181260751279514,
+    "operating_conf": 0.35,
+    "operating": {
+      "TP": 168,
+      "FP": 84,
+      "FN": 137,
+      "precision": 0.6666666666666666,
+      "recall": 0.5508196721311476,
+      "false_positives_on_negative_images": 21,
+      "mean_absolute_count_error": 0.8563829787234043
+    },
+    "per_class": {
+      "cow": {
+        "precision": 0.8390840489524145,
+        "recall": 0.5832064492416303,
+        "mAP50": 0.6254166823422429,
+        "mAP50-95": 0.5232580123155807,
+        "operating_conf": 0.35,
+        "operating": {
+          "TP": 83,
+          "FP": 5,
+          "FN": 69,
+          "precision": 0.9431818181818182,
+          "recall": 0.5460526315789473,
+          "false_positives_on_negative_images": 0,
+          "mean_absolute_count_error": 0.7446808510638298
+        }
+      },
+      "person": {
+        "precision": 0.5144787415032983,
+        "recall": 0.5555555555555556,
+        "mAP50": 0.4859785693340473,
+        "mAP50-95": 0.3003672027100096,
+        "operating_conf": 0.35,
+        "operating": {
+          "TP": 85,
+          "FP": 79,
+          "FN": 68,
+          "precision": 0.5182926829268293,
+          "recall": 0.5555555555555556,
+          "false_positives_on_negative_images": 21,
+          "mean_absolute_count_error": 0.9680851063829787
+        }
+      }
+    },
+    "aggregation": "Macro AP/precision/recall; operating counts summed over image/class pairs",
+    "weights": "yolo11n.pt",
+    "split": "test",
+    "images": 94,
+    "conf": 0.001,
+    "iou": 0.6,
+    "imgsz": 640,
+    "class_names": [
+      "cow",
+      "person"
+    ],
+    "model_class_ids": [
+      19,
+      0
+    ],
+    "dataset_class_ids": {
+      "cow": 19,
+      "person": 0
+    },
+    "mean_inference_ms_per_image": 66.51269680940536
+  },
+  {
+    "precision": 0.8037453500184151,
+    "recall": 0.5633381530932552,
+    "mAP50": 0.6069161781145355,
+    "mAP50-95": 0.4217548402371951,
+    "operating_conf": 0.35,
+    "operating": {
+      "TP": 161,
+      "FP": 28,
+      "FN": 144,
+      "precision": 0.8518518518518519,
+      "recall": 0.5278688524590164,
+      "false_positives_on_negative_images": 8,
+      "mean_absolute_count_error": 0.7659574468085106
+    },
+    "per_class": {
+      "cow": {
+        "precision": 0.9421611979113528,
+        "recall": 0.6430161754675562,
+        "mAP50": 0.6894977972889247,
+        "mAP50-95": 0.5486865435344935,
+        "operating_conf": 0.35,
+        "operating": {
+          "TP": 99,
+          "FP": 7,
+          "FN": 53,
+          "precision": 0.9339622641509434,
+          "recall": 0.6513157894736842,
+          "false_positives_on_negative_images": 1,
+          "mean_absolute_count_error": 0.5531914893617021
+        }
+      },
+      "person": {
+        "precision": 0.6653295021254774,
+        "recall": 0.48366013071895425,
+        "mAP50": 0.5243345589401462,
+        "mAP50-95": 0.2948231369398967,
+        "operating_conf": 0.35,
+        "operating": {
+          "TP": 62,
+          "FP": 21,
+          "FN": 91,
+          "precision": 0.7469879518072289,
+          "recall": 0.40522875816993464,
+          "false_positives_on_negative_images": 7,
+          "mean_absolute_count_error": 0.9787234042553191
+        }
+      }
+    },
+    "aggregation": "Macro AP/precision/recall; operating counts summed over image/class pairs",
+    "weights": "models/cattle_coco_yolo11n_best.pt",
+    "split": "test",
+    "images": 94,
+    "conf": 0.001,
+    "iou": 0.6,
+    "imgsz": 640,
+    "class_names": [
+      "cow",
+      "person"
+    ],
+    "model_class_ids": [
+      19,
+      0
+    ],
+    "dataset_class_ids": {
+      "cow": 19,
+      "person": 0
+    },
+    "mean_inference_ms_per_image": 61.023270214370335
+  }
+]

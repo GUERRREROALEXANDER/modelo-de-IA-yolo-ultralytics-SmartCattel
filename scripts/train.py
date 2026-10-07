@@ -51,6 +51,8 @@ def main(argv=None):
     parser.add_argument("--name")
     parser.add_argument("--weights-out", type=Path, default=Path("models/cattle_yolo11n_best.pt"))
     parser.add_argument("--fraction", type=float, help="Fraction of training data for a debug run")
+    parser.add_argument("--resume", action="store_true",
+                        help="Continue the interrupted run from its weights/last.pt")
     args = parser.parse_args(argv)
 
     config_path = args.config if args.config.is_absolute() else ROOT / args.config
@@ -80,9 +82,15 @@ def main(argv=None):
     run_dir = Path(cfg["project"]) / cfg["name"]
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "hardware.json").write_text(json.dumps(hardware, indent=2) + "\n", encoding="utf-8")
-    model = YOLO(model_path)
+    if args.resume:
+        last = run_dir / "weights" / "last.pt"
+        if not last.is_file():
+            parser.error(f"Nothing to resume: {last} not found")
+        model = YOLO(str(last))
+    else:
+        model = YOLO(model_path)
     start = time.perf_counter()
-    train_metrics = model.train(**cfg)
+    train_metrics = model.train(resume=True) if args.resume else model.train(**cfg)
     duration = time.perf_counter() - start
     run_dir = Path(model.trainer.save_dir)
     (run_dir / "hardware.json").write_text(json.dumps(hardware, indent=2) + "\n", encoding="utf-8")
