@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from smartcattle_ai.backend_client import BackendClient
+from smartcattle_ai.tunnel import parse_tunnel_url
 from smartcattle_ai.live import (
     LatestFrame, LiveState, classify_zone, detection_worker, make_server, status_report, status_worker,
 )
@@ -64,6 +65,20 @@ def test_status_report_waits_for_connection_and_hides_urls():
     report = status_report(state)
     assert "error" not in report
     assert (report["frame_width"], report["frame_height"], report["fps"]) == (640, 352, 11.0)
+
+
+def test_status_report_includes_public_url_only_while_online():
+    state = LiveState("camera-01", ZONE, "https://abc-def.trycloudflare.com")
+    state.set_camera_status("online")
+    assert status_report(state)["stream_url"] == "https://abc-def.trycloudflare.com"
+    state.set_camera_status("error", "Stream read failed")
+    assert "stream_url" not in status_report(state)
+
+
+def test_parse_tunnel_url():
+    line = "2026-10-07T05:40:00Z INF |  https://quiet-river-cow-42.trycloudflare.com                  |"
+    assert parse_tunnel_url(line) == "https://quiet-river-cow-42.trycloudflare.com"
+    assert parse_tunnel_url("INF Starting tunnel") is None
 
 
 def test_status_worker_reports_changes_immediately():
