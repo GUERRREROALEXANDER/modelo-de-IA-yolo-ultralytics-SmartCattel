@@ -1,0 +1,34 @@
+[
+  {
+    "precision": 0.6895128500628114,
+    "recall": 0.5131578947368421,
+    "mAP50": 0.5461091908626472,
+    "mAP50-95": 0.3350154039460439,
+    "operating_conf": 0.35,
+    "operating": {
+      "TP": 78,
+      "FP": 33,
+      "FN": 74,
+      "precision": 0.7027027027027027,
+      "recall": 0.5131578947368421,
+      "false_positives_on_negative_images": 9,
+      "mean_absolute_count_error": 0.8829787234042553
+    },
+    "weights": "runs/cattle/yolo11n_finetune/weights/best.pt",
+    "split": "test",
+    "images": 94,
+    "conf": 0.001,
+    "iou": 0.6,
+    "imgsz": 640,
+    "class_names": [
+      "cow"
+    ],
+    "model_class_ids": [
+      0
+    ],
+    "dataset_class_ids": {
+      "cow": 0
+    },
+    "mean_inference_ms_per_image": 150.97320851039493
+  }
+]

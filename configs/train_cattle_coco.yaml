@@ -1,6 +1,6 @@
 model: yolo11n.pt
 data: datasets/cattle_coco/data.yaml
-epochs: 30
+epochs: 25
 patience: 8
 imgsz: 640
 batch: 8
@@ -8,9 +8,12 @@ device: cpu
 workers: 4
 seed: 0
 deterministic: true
+# Low LR + frozen backbone keep the pretrained COCO cow/person knowledge on a small dataset.
 optimizer: AdamW
-lr0: 0.002
+lr0: 0.0005
 warmup_epochs: 1
+warmup_bias_lr: 0.0
+freeze: 10
 pretrained: true
 cos_lr: false
 close_mosaic: 5

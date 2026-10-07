@@ -11,13 +11,12 @@ def _default_device() -> str:
     return "0" if torch.cuda.is_available() else "cpu"
 
 
+DEFAULT_WEIGHTS = Path(__file__).resolve().parents[1] / "models" / "cattle_coco_yolo11n_best.pt"
+
+
 def _default_weights() -> str:
-    models = Path(__file__).resolve().parents[1] / "models"
-    for filename in ("cattle_coco_yolo11n_best.pt", "cattle_yolo11n_best.pt"):
-        weights = models / filename
-        if weights.is_file():
-            return str(weights)
-    return "yolo11n.pt"
+    # Fine-tuned cow+person model; pretrained COCO weights if it has not been trained yet.
+    return str(DEFAULT_WEIGHTS) if DEFAULT_WEIGHTS.is_file() else "yolo11n.pt"
 
 
 @dataclass(frozen=True)

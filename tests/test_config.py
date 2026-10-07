@@ -6,7 +6,7 @@ from smartcattle_ai import Settings
 @pytest.mark.parametrize("coco_exists,cattle_exists,expected", [
     (True, True, "cattle_coco_yolo11n_best.pt"),
     (True, False, "cattle_coco_yolo11n_best.pt"),
-    (False, True, "cattle_yolo11n_best.pt"),
+    (False, True, None),
     (False, False, None),
 ])
 def test_defaults(monkeypatch, tmp_path, coco_exists, cattle_exists, expected):
