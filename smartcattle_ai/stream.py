@@ -3,6 +3,7 @@
 import os
 import re
 import time
+from collections.abc import Callable
 from urllib.parse import quote, urlsplit
 
 import cv2
@@ -53,7 +54,7 @@ def _open_capture(url: str, open_timeout_s: float, read_timeout_s: float):
 class CameraStream:
     """Owns at most one capture; frames() reconnects with exponential backoff."""
 
-    def __init__(self, url: str, open_timeout_s: float = 10, read_timeout_s: float = 10,
+    def __init__(self, url: str | Callable[[], str], open_timeout_s: float = 10, read_timeout_s: float = 10,
                  max_backoff_s: float = 30, capture_factory=None, sleep=time.sleep):
         self.url = url
         self.open_timeout_s = open_timeout_s
@@ -83,7 +84,9 @@ class CameraStream:
     def open(self) -> bool:
         self.release()
         try:
-            capture = self._factory(self.url, self.open_timeout_s, self.read_timeout_s)
+            # A callable url (e.g. the Imou cloud) is resolved again on every reconnect: its URLs can change.
+            url = self.url() if callable(self.url) else self.url
+            capture = self._factory(url, self.open_timeout_s, self.read_timeout_s)
         except Exception as exc:  # OpenCV raises cv2.error for some backends
             self._set_state("error", f"Could not open stream: {exc}")
             return False
