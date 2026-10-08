@@ -366,7 +366,13 @@ powershell -ExecutionPolicy Bypass -File scripts\start_local.ps1   # backend, li
 
 `python live.py --tunnel` (or `SMARTCATTLE_LIVE_TUNNEL=1`) also starts a Cloudflare quick tunnel (`cloudflared` on PATH, in `%LOCALAPPDATA%\cloudflared\`, or `SMARTCATTLE_CLOUDFLARED`) and reports its `https://*.trycloudflare.com` URL to the backend as the camera's `stream_url`, so a hosted frontend finds the video without a rebuild. The URL changes on every start, and anyone who has it can watch the camera. `--public-url` reports a fixed URL instead.
 
-The frontend uses the camera's `stream_url` from the backend and falls back to `VITE_AI_SERVICE_URL` (default setup: `http://localhost:8090`). The service runs on the PC that shares the camera's network; a hosted frontend can only show the video in a browser that can reach this PC. Test the model on footage from this camera before relying on its counts.
+The frontend uses the camera's `stream_url` from the backend and falls back to `VITE_AI_SERVICE_URL` (default setup: `http://localhost:8090`). Over RTSP the service has to run on a PC that shares the camera's network. Test the model on footage from this camera before relying on its counts.
+
+### Cloud deployment (Imou Open Platform)
+
+With `IMOU_APP_ID`, `IMOU_APP_SECRET` and `IMOU_DEVICE_ID` set, `live.py` skips RTSP and asks the Imou cloud for the camera's HLS live URL (`bindDeviceLive` the first time, then `getLiveStreamInfo` on every reconnect), so it can run anywhere with internet access. The camera must be added to the Imou developer account that owns the app (open.imoulife.com). HLS adds a few seconds of delay compared with RTSP.
+
+`render.yaml` deploys the `Dockerfile` as a Render web service: in Render choose **New > Blueprint**, select this repository and fill in the variables marked as secret. The service listens on Render's `PORT` and reports `RENDER_EXTERNAL_URL` to the backend as the camera's `stream_url`. It uses the `starter` plan because free instances sleep after 15 minutes without visitors and are too slow for the detector. `SMARTCATTLE_IMGSZ=416` trades some accuracy for speed on that CPU.
 
 ## Credits and licenses
 
