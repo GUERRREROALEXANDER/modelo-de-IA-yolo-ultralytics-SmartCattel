@@ -1,6 +1,8 @@
 __pycache__/
 *.pt
 models/*.pt
+# The deployed checkpoint (5.5 MB): cloud builds start from the repository.
+!models/cattle_coco_yolo11n_best.pt
 runs/
 outputs/
 datasets/
