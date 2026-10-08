@@ -9,6 +9,7 @@ from threading import Event, Thread
 from smartcattle_ai import Detector, Settings
 from smartcattle_ai.backend_client import BackendClient, BackendError, EventThrottle
 from smartcattle_ai.env import load_env_file
+from smartcattle_ai.imou import imou_configured, imou_url_provider
 from smartcattle_ai.live import (
     DEFAULT_ORIGINS, LatestFrame, LiveState, capture_worker, detection_worker, make_server, status_worker,
 )
@@ -20,24 +21,28 @@ from smartcattle_ai.tunnel import QuickTunnel, find_cloudflared
 def main(argv=None) -> int:
     load_env_file()
     parser = argparse.ArgumentParser(description="Live camera detection served as MJPEG.")
-    parser.add_argument("--url", help="Stream URL (default: CAMERA_RTSP_URL or CAMERA_* variables)")
+    parser.add_argument("--url", help="Stream URL (default: the Imou cloud if IMOU_APP_ID is set, "
+                                      "else CAMERA_RTSP_URL or CAMERA_* variables)")
     parser.add_argument("--camera-id", default=os.getenv("CAMERA_ID") or os.getenv("SMARTCATTLE_CAMERA_ID") or "camera-01")
     parser.add_argument("--zone", default=os.getenv("SMARTCATTLE_ZONE") or "0.1,0.1,0.9,0.9")
     parser.add_argument("--backend-url", default=os.getenv("SMARTCATTLE_BACKEND_URL"))
     parser.add_argument("--event-cooldown", type=float, default=10.0)
     parser.add_argument("--status-interval", type=float, default=15.0)
     parser.add_argument("--host", default=os.getenv("SMARTCATTLE_LIVE_HOST") or "127.0.0.1")
-    parser.add_argument("--port", type=int, default=int(os.getenv("SMARTCATTLE_LIVE_PORT") or 8090))
+    # PORT is what hosts such as Render assign to the service.
+    parser.add_argument("--port", type=int,
+                        default=int(os.getenv("SMARTCATTLE_LIVE_PORT") or os.getenv("PORT") or 8090))
     parser.add_argument("--origins", default=os.getenv("SMARTCATTLE_LIVE_ORIGINS") or ",".join(DEFAULT_ORIGINS),
                         help="Comma-separated frontend origins allowed to read /status")
-    parser.add_argument("--public-url", default=os.getenv("SMARTCATTLE_LIVE_PUBLIC_URL") or None,
+    parser.add_argument("--public-url",
+                        default=os.getenv("SMARTCATTLE_LIVE_PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL") or None,
                         help="URL where browsers reach this server; reported to the backend")
     parser.add_argument("--tunnel", action="store_true", default=os.getenv("SMARTCATTLE_LIVE_TUNNEL") == "1",
                         help="Publish the video through a Cloudflare quick tunnel (anyone with the URL can watch)")
     args = parser.parse_args(argv)
 
     try:
-        url = args.url or camera_url_from_env()
+        url = args.url or (imou_url_provider() if imou_configured() else camera_url_from_env())
         zone = parse_zone(args.zone)
         if not 1 <= len(args.camera_id) <= 64:
             raise ValueError("camera-id must contain 1 to 64 characters")
@@ -94,7 +99,7 @@ def main(argv=None) -> int:
     for worker in workers:
         worker.start()
     base = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}"
-    print(f"Camera {args.camera_id}: {redact_url(url)}")
+    print(f"Camera {args.camera_id}: {redact_url(str(url))}")
     print(f"Backend: {args.backend_url or 'disabled'}")
     print(f"Video: {base}/video.mjpg  Status: {base}/status  (Ctrl+C to stop)")
     if state.public_url:
