@@ -1,4 +1,4 @@
-"""Thread-safe, lazily loaded cow and person detector."""
+"""Thread-safe, lazily loaded detector for cattle, people and the other farm animals in ALLOWED_CLASSES."""
 
 from pathlib import Path
 from threading import Lock

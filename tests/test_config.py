@@ -54,7 +54,7 @@ def test_from_env(monkeypatch):
     ({"imgsz": 33}, "imgsz"),
     ({"class_names": ()}, "class_names"),
     ({"class_names": ("",)}, "class_names"),
-    ({"class_names": ("horse",)}, "class_names"),
+    ({"class_names": ("cat",)}, "class_names"),
     ({"person_weights": ""}, "person_weights"),
 ])
 def test_invalid_settings(changes, message):

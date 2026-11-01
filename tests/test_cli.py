@@ -33,5 +33,6 @@ def test_classes_option_and_rejects_other_classes(monkeypatch, capsys, tmp_path)
     source = tmp_path / "cow.jpg"
     save_image(source, np.zeros((64, 64, 3), dtype=np.uint8))
     assert detect.main(["--source", str(source), "--no-save", "--classes", "cow"]) == 0
-    assert detect.main(["--source", str(source), "--no-save", "--classes", "horse"]) == 1
+    assert detect.main(["--source", str(source), "--no-save", "--classes", "cow,horse"]) == 0
+    assert detect.main(["--source", str(source), "--no-save", "--classes", "cat"]) == 1
     assert "class_names" in capsys.readouterr().err
