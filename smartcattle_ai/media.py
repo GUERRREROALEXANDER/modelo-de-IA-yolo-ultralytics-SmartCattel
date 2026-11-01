@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .zones import as_zone_set
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 
@@ -24,15 +25,20 @@ def draw_detections(frame: np.ndarray, detections: list[dict], zone=None) -> np.
     annotated = frame.copy()
     if zone is not None:
         height, width = frame.shape[:2]
-        left, top, right, bottom = zone
-        cv2.rectangle(annotated, (round(left * width), round(top * height)),
-                      (round(right * width), round(bottom * height)), (255, 0, 0), 2)
+        for area in as_zone_set(zone).areas:
+            if area.outline:
+                points = np.array([[round(x * width), round(y * height)] for x, y in area.outline], np.int32)
+                cv2.polylines(annotated, [points], True, (255, 0, 0), 2)
+            else:
+                cv2.rectangle(annotated, (round(area.left * width), round(area.top * height)),
+                              (round(area.right * width), round(area.bottom * height)), (255, 0, 0), 2)
     for detection in detections:
         x1, y1, x2, y2 = (int(round(value)) for value in detection["bbox"])
         outside = detection.get("inside_zone") is False
         color = (0, 0, 255) if outside else (0, 165, 255) if detection["class"] == "person" else (0, 255, 0)
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-        label = f'{detection["class"]} {detection["confidence"]:.2f}' + (" OUT" if outside else "")
+        track = f' #{detection["track_id"]}' if detection.get("track_id") is not None else ""
+        label = f'{detection["class"]}{track} {detection["confidence"]:.2f}' + (" OUT" if outside else "")
         cv2.putText(annotated, label, (x1, max(y1 - 5, 12)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     cattle = sum(item["class"] == "cow" for item in detections)
