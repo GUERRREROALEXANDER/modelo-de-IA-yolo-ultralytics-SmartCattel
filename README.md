@@ -55,7 +55,8 @@ Details and sources for every number are in [Model and training](#model-and-trai
 │   ├── train.py                       # Fine-tune YOLO, resume, and write reports.
 │   ├── evaluate.py                    # Compare checkpoints per class on a YOLO split.
 │   ├── scenario_report.py             # Predictions on licensed scenario images.
-│   └── video_report.py                # Compare checkpoints on videos with contact sheets.
+│   ├── video_report.py                # Compare checkpoints on videos with contact sheets.
+│   └── export_onnx.py                 # Export to ONNX and time it against PyTorch.
 ├── configs/
 │   ├── train_cattle_coco.yaml         # Settings of the default model.
 │   └── train_cattle.yaml              # Single-class experiment settings.
@@ -345,7 +346,7 @@ python -m pytest -q
 python -m pytest -q -m real
 ```
 
-The first command runs the whole suite (244 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, gate counting, other farm animals, people at night, the heat map, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
+The first command runs the whole suite (256 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, gate counting, other farm animals, people at night, the heat map, the ONNX export, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
 
 ## Limitations
 
@@ -434,6 +435,26 @@ A phone on the farm network is reachable only from a PC on that network, so its 
 With `IMOU_APP_ID`, `IMOU_APP_SECRET` and `IMOU_DEVICE_ID` set, `live.py` skips RTSP and asks the Imou cloud for the camera's HLS live URL (`bindDeviceLive` the first time, then `getLiveStreamInfo` on every reconnect), so it can run anywhere with internet access. The camera must be added to the Imou developer account that owns the app (open.imoulife.com). HLS adds a few seconds of delay compared with RTSP.
 
 `render.yaml` deploys the `Dockerfile` as a Render web service: in Render choose **New > Blueprint**, select this repository and fill in the variables marked as secret. The service listens on Render's `PORT` and reports `RENDER_EXTERNAL_URL` to the backend as the camera's `stream_url`. It uses the `starter` plan because free instances sleep after 15 minutes without visitors and are too slow for the detector. `SMARTCATTLE_IMGSZ=416` trades some accuracy for speed on that CPU.
+
+## Faster CPU inference with ONNX
+
+`scripts/export_onnx.py` exports the model to ONNX, which ONNX Runtime runs faster on a CPU than PyTorch does. It needs the optional packages in `requirements-onnx.txt`.
+
+```powershell
+pip install -r requirements-onnx.txt
+python scripts/export_onnx.py --benchmark                 # outputs/onnx/cattle_coco_yolo11n_best_640.onnx
+$env:SMARTCATTLE_WEIGHTS = "outputs/onnx/cattle_coco_yolo11n_best_640.onnx"
+python live.py                                            # same detector, ONNX weights
+```
+
+Measured on the development PC's CPU, at 640 px, mean of 20 predictions on a sample image:
+
+| Weights | ms/frame | Speedup |
+| --- | ---: | ---: |
+| `cattle_coco_yolo11n_best.pt` | 58.0 | 1.00× |
+| `cattle_coco_yolo11n_best_640.onnx` | 43.4 | 1.34× |
+
+The ONNX file has a fixed input size: export it with the same `--imgsz` you run it with (`SMARTCATTLE_IMGSZ`, 416 on Render). It keeps the class names, so cow, person and the other animals are routed the same way. The export goes to `outputs/`, which Git ignores; the Docker image still ships the `.pt` model.
 
 ## Uploaded videos
 
