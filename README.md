@@ -40,6 +40,7 @@ Details and sources for every number are in [Model and training](#model-and-trai
 │   ├── stillness.py                   # Notices a tracked cow that has not moved for a long time.
 │   ├── line_counter.py                # Counts tracked cattle crossing a gate line.
 │   ├── night_watch.py                 # Night window and once-per-person announcements.
+│   ├── heatmap.py                     # Grid of where the cattle stand, painted over a frame.
 │   ├── pipeline.py                    # Rule-event publishing, once per escape.
 │   ├── live.py                        # Live service workers: detection, status, head count, zones.
 │   ├── video_jobs.py                  # Uploaded-video worker: claim, download, analyze, report.
@@ -344,7 +345,7 @@ python -m pytest -q
 python -m pytest -q -m real
 ```
 
-The first command runs the whole suite (213 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, gate counting, other farm animals, people at night, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
+The first command runs the whole suite (244 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, gate counting, other farm animals, people at night, the heat map, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
 
 ## Limitations
 
@@ -365,6 +366,7 @@ The first command runs the whole suite (213 tests), **including** tests marked `
 | `/video.mjpg` | MJPEG video with boxes and the safe zone drawn in; cows outside the zone are red. |
 | `/status` | Camera state, frame size, FPS and the latest detections (pixel boxes, `inside_zone`). |
 | `/snapshot.jpg` | Latest annotated frame. |
+| `/heatmap.jpg` | Latest frame with a heat map of where the cattle have stood since the service started (404 with `--no-heatmap`). |
 | `/health` | `{"status":"ok"}` |
 
 With `SMARTCATTLE_BACKEND_URL` set it also:
@@ -385,6 +387,8 @@ python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091 --gate
 **Other animals.** The fine-tuned model kept the 80-class COCO head, so it still recognizes dogs (16), horses (17), sheep (18) and bears (21) in the same prediction, at no extra cost. They are off by default; turn them on with `SMARTCATTLE_CLASSES=cow,person,dog,horse`. They are drawn in cyan and counted apart on the video, and they are never counted as cattle, checked against the zone or sent to the backend's head count. A dog or a bear, which can scatter or attack the herd, is announced once per animal in the console. These classes were not part of the fine-tuning data, so their accuracy is COCO's, not measured on farm footage.
 
 **People at night.** With `--night-window 20:00-05:30` (or `SMARTCATTLE_NIGHT_WINDOW`), a person seen inside that local window is drawn in red with `NIGHT`, carries `night: true` in `/status`, and is announced once in the console: at that hour nobody is expected among the animals. The window may cross midnight and is read in `--timezone` (`SMARTCATTLE_TIMEZONE`, `America/Bogota` by default), so it works the same on a PC in Colombia and on a server in UTC. It is off by default and needs tracking.
+
+**Heat map.** Every frame drops the ground point of each cow into a 32×18 grid. `/heatmap.jpg` paints it over the latest frame (blue: seldom, red: most of the time), which shows where the herd gathers: shade, water, a corner of the pen. It counts sightings, not distinct animals, starts empty on every start, and `/status` reports how many positions it holds as `heatmap_samples`. `--no-heatmap` turns it off.
 
 A backend that is down does not stop the video. `/status` also returns `zones` (every zone with its outline) and `zone_source` (`backend` or `config`). `/status` allows CORS only from `SMARTCATTLE_LIVE_ORIGINS` (default: local Vite ports). It listens on `127.0.0.1` unless `--host 0.0.0.0` is given.
 
