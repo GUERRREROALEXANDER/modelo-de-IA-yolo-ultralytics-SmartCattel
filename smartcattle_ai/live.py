@@ -131,6 +131,21 @@ class VisitorLog:
         return found
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def mark_intruders(night, detections: list[dict], now: datetime, camera_id: str) -> list[dict]:
+    """During the night window, flags every tracked person with night=True and warns once per person."""
+    for item in night.new_intruders(detections, now):
+        print(f"Warning: camera {camera_id}, person #{item['track_id']} in view at night "
+              f"({item['confidence']:.2f})", flush=True)
+    if not night.is_night(now):
+        return detections
+    return [{**item, "night": True} if item["class"] == "person" and item.get("track_id") is not None else item
+            for item in detections]
+
+
 def mark_still(stillness, detections: list[dict], width: int, height: int, now: float,
                camera_id: str) -> list[dict]:
     """Adds still_for_s to tracked cows, and still=True once past the limit; warns once per still period.
@@ -148,7 +163,7 @@ def mark_still(stillness, detections: list[dict], width: int, height: int, now: 
 
 def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Event,
                      publisher=None, jpeg_quality: int = 80, tracker=None, stillness=None,
-                     visitors=None) -> None:
+                     visitors=None, night=None, clock=None) -> None:
     fps = None
     last = None
     while not stop.is_set():
@@ -163,6 +178,8 @@ def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Even
         detections = classify_zone(detections, width, height, zone)
         if stillness is not None:
             detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
+        if night is not None:
+            detections = mark_intruders(night, detections, (clock or _utc_now)(), state.camera_id)
         if visitors is not None:
             for item in visitors.new(detections):
                 print(f"Warning: camera {state.camera_id}, {item['class']} #{item['track_id']} in view "
