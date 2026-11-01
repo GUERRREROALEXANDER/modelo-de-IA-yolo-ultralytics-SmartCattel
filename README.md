@@ -25,6 +25,9 @@ Details and sources for every number are in [Model and training](#model-and-trai
 ```text
 .
 ├── detect.py                          # Image, folder, video, and backend CLI.
+├── live.py                            # Live camera (Imou, RTSP, phone, webcam) + YOLO + backend.
+├── video_worker.py                    # Processes the videos uploaded in the dashboard.
+├── probe_camera.py                    # Checks that a camera or phone stream reaches this PC.
 ├── smartcattle_ai/
 │   ├── __init__.py                    # Exports Detector and Settings.
 │   ├── config.py                      # Validated inference settings and environment defaults.
@@ -32,7 +35,12 @@ Details and sources for every number are in [Model and training](#model-and-trai
 │   ├── model_loader.py                # Ultralytics loader and class-ID helper.
 │   ├── media.py                       # OpenCV reading, annotation, and output.
 │   ├── rules.py                       # Safe-zone rule based on box bottom center.
-│   ├── pipeline.py                    # Rule-event publishing.
+│   ├── zones.py                       # Safe zones: rectangles, polygons, several per camera.
+│   ├── tracking.py                    # IoU tracker: one number per animal across frames.
+│   ├── pipeline.py                    # Rule-event publishing, once per escape.
+│   ├── live.py                        # Live service workers: detection, status, head count, zones.
+│   ├── video_jobs.py                  # Uploaded-video worker: claim, download, analyze, report.
+│   ├── stream.py                      # Reconnecting capture; phone and webcam sources.
 │   ├── backend_client.py              # HTTP client, payload conversion, and cooldown.
 │   ├── evaluation.py                  # Cattle matching and metrics.
 │   └── camera.py                      # Stream-reading helper, separate from detect.py.
@@ -333,7 +341,7 @@ python -m pytest -q
 python -m pytest -q -m real
 ```
 
-The first command runs the whole suite (74 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, dataset validation, and metric calculations.
+The first command runs the whole suite (136 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
 
 ## Limitations
 
@@ -341,7 +349,7 @@ The first command runs the whole suite (74 tests), **including** tests marked `r
 - **Recall.** At confidence 0.35 the model still misses 53 of 152 test cows (recall 0.651) and 91 of 153 test persons (recall 0.405).
 - **Distant and crowded cows.** Very small distant cows and tightly overlapping herds are the weakest scenarios; the fine-tuned model is worse than pretrained on tiny distant cows.
 - **Unusual breeds.** Watusi and Highland cattle are each detected only 1 of 2 times.
-- **No tracking.** Video totals count the same animal in every frame; there is no identity, so throttling is per camera, not per animal.
+- **Simple tracking.** `tracking.py` matches boxes by overlap from one frame to the next. It keeps an animal's number while it walks, but two cows crossing each other can swap numbers, and one hidden for longer than about a second (live: 15 processed frames) comes back as a new animal. `detect.py` totals still count the same animal in every frame.
 - **CPU speed.** About 60–100 ms per frame at 640 px on the recorded CPU, so a live stream needs frame skipping (`--vid-stride`).
 - **Inputs.** `detect.py` requires an existing file or folder; the live camera goes through `live.py` instead.
 
@@ -356,7 +364,14 @@ The first command runs the whole suite (74 tests), **including** tests marked `r
 | `/snapshot.jpg` | Latest annotated frame. |
 | `/health` | `{"status":"ok"}` |
 
-With `SMARTCATTLE_BACKEND_URL` set it reports the camera status every 15 s (`PUT /api/ai/cameras/{id}/status`) and posts out-of-zone events, at most one per `--event-cooldown` seconds. A backend that is down does not stop the video. `/status` allows CORS only from `SMARTCATTLE_LIVE_ORIGINS` (default: local Vite ports). It listens on `127.0.0.1` unless `--host 0.0.0.0` is given.
+With `SMARTCATTLE_BACKEND_URL` set it also:
+
+- reports the camera status every 15 s (`PUT /api/ai/cameras/{id}/status`);
+- sends the head count, cattle inside and outside with their boxes, every second (`PUT /api/ai/cameras/{id}/occupancy`, `--occupancy-interval`). The backend shows it on the live dashboard and keeps one sample per minute for the history reports;
+- loads the safe zones drawn in the dashboard (`GET /api/ai/cameras/{id}/zones`) and reloads them every 30 s (`--zone-sync-interval`), so a new or edited zone applies without a restart. Polygons are honored, and with several zones an animal is safe in any of them. When the camera has no active zone, `--zone` / `SMARTCATTLE_ZONE` applies; when the backend cannot be reached, the zone in use stays;
+- posts an out-of-zone event **once per escape**: each cow gets a number (`track_id`) that follows it from frame to frame, and it is reported when it leaves the zone, not on every frame it stays out. It can be reported again after being seen back inside. `--event-cooldown` still spaces events per camera, so a whole herd walking out becomes a trickle of alerts. `--no-tracking` returns to one event per cooldown.
+
+A backend that is down does not stop the video. `/status` also returns `zones` (every zone with its outline) and `zone_source` (`backend` or `config`). `/status` allows CORS only from `SMARTCATTLE_LIVE_ORIGINS` (default: local Vite ports). It listens on `127.0.0.1` unless `--host 0.0.0.0` is given.
 
 ```powershell
 python probe_camera.py --duration 10 --reconnect-test   # check the stream first
@@ -368,11 +383,60 @@ powershell -ExecutionPolicy Bypass -File scripts\start_local.ps1   # backend, li
 
 The frontend uses the camera's `stream_url` from the backend and falls back to `VITE_AI_SERVICE_URL` (default setup: `http://localhost:8090`). Over RTSP the service has to run on a PC that shares the camera's network. Test the model on footage from this camera before relying on its counts.
 
+### Phone camera, webcam, and more than one camera
+
+`--url` (or `CAMERA_URL` in `.env`) accepts any of these:
+
+| What you have | Value | Example |
+| --- | --- | --- |
+| A phone app that shows an IP address, such as **IP Webcam** (Android) | the address the app shows | `--url 192.168.1.20:8080` (read as `http://192.168.1.20:8080/video`) |
+| **DroidCam** over Wi-Fi | address and path | `--url 192.168.1.20:4747/video` |
+| An app that gives a full link (RTSP or HTTP) | the link | `--url rtsp://192.168.1.20:8554/live` |
+| A webcam, or a phone turned into one by the **DroidCam** or **Iriun** PC client | its index | `--url 0` (built-in webcam), `--url 1` (the next one) |
+
+The phone and the PC must be on the same Wi-Fi network, and the app must stay open with the screen on. Check the stream before running YOLO:
+
+```powershell
+python probe_camera.py --url 192.168.1.20:8080
+python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091
+```
+
+**Each camera is one `live.py`**, with its own `--camera-id` and `--port`. The Imou camera can keep running on 8090 while the phone runs on 8091. The `camera-id` is how the backend tells cameras apart: it is the name zones are drawn for in the dashboard, and it may contain letters, digits, `-` and `_` (up to 64). Each process loads its own copy of the model, about 10 FPS per camera on a CPU.
+
+```powershell
+python live.py                                                         # Imou camera, camera-01, port 8090
+python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091   # phone, in a second window
+```
+
+A phone on the farm network is reachable only from a PC on that network, so its `live.py` runs on that PC, not on Render. Use `--tunnel` to show its video in a hosted frontend.
+
 ### Cloud deployment (Imou Open Platform)
 
 With `IMOU_APP_ID`, `IMOU_APP_SECRET` and `IMOU_DEVICE_ID` set, `live.py` skips RTSP and asks the Imou cloud for the camera's HLS live URL (`bindDeviceLive` the first time, then `getLiveStreamInfo` on every reconnect), so it can run anywhere with internet access. The camera must be added to the Imou developer account that owns the app (open.imoulife.com). HLS adds a few seconds of delay compared with RTSP.
 
 `render.yaml` deploys the `Dockerfile` as a Render web service: in Render choose **New > Blueprint**, select this repository and fill in the variables marked as secret. The service listens on Render's `PORT` and reports `RENDER_EXTERNAL_URL` to the backend as the camera's `stream_url`. It uses the `starter` plan because free instances sleep after 15 minutes without visitors and are too slow for the detector. `SMARTCATTLE_IMGSZ=416` trades some accuracy for speed on that CPU.
+
+## Uploaded videos
+
+`video_worker.py` processes the videos people upload in the dashboard. It waits on the backend's queue (`POST /api/ai/video-jobs/claim`, every 5 s when it is empty), downloads each video from storage, and runs the same detector, tracker and safe-zone rule as the live camera over it. The zones are those of the lot's camera, or `--zone` when the lot has none.
+
+```powershell
+$env:SMARTCATTLE_API_KEY = "<the backend AI_API_KEY>"
+python video_worker.py --backend-url https://<backend>.onrender.com
+python video_worker.py --backend-url http://127.0.0.1:8000 --once   # one video, then exit
+```
+
+Every 2 s it sends progress with the current frame's boxes (`PUT .../progress`), which renews the job's ten-minute lease and lets the dashboard draw the boxes over the playback. At the end it delivers the summary (`POST .../complete`):
+
+| Field | Meaning |
+| --- | --- |
+| `frames_analyzed` | Frames run through the model: one of every `--vid-stride` (default 2) |
+| `max_cattle`, `max_people` | Most seen in a single frame |
+| `alerts` | One per cow escape (when it leaves the zone) and one per person who appears, with the second of the video; at most 500 |
+| `outside_ratio` | Share of cattle sightings that were outside the zone |
+| `avg_confidence` | Mean confidence over all detections |
+
+A file that cannot be downloaded or decoded is marked failed (`POST .../fail`) with a reason people can read. If another worker took the job over (its lease expired), this one drops it without reporting. The backend needs `VIDEO_STORAGE_*` configured; without it the queue answers 503 and the worker keeps waiting. The downloaded copy is deleted after each job.
 
 ## Credits and licenses
 
