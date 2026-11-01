@@ -90,6 +90,7 @@ class CameraStream:
         self._sleep = sleep
         self._capture = None
         self._stopped = False
+        self._reopen = False
         self._callbacks = []
         self.state = "connecting"
         self.last_error = None
@@ -145,9 +146,20 @@ class CameraStream:
     def stop(self) -> None:
         self._stopped = True
 
+    def switch(self, url: str | Callable[[], str]) -> None:
+        """Point the stream at another camera. The capture thread reconnects on its next frame, so the
+        capture is never released from another thread while it is being read."""
+        self.url = url
+        self._reopen = True
+        self._set_state("connecting")
+
     def frames(self):
         backoff = 1.0
         while not self._stopped:
+            if self._reopen:
+                self._reopen = False
+                self.release()
+                backoff = 1.0
             if self._capture is None and not self.open():
                 self._sleep(backoff)
                 backoff = min(backoff * 2, self.max_backoff_s)

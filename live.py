@@ -132,7 +132,7 @@ def main(argv=None) -> int:
 
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
     try:
-        server = make_server(state, stop, args.host, args.port, origins)
+        server = make_server(state, stop, args.host, args.port, origins, camera=stream)
     except OSError as exc:
         print(f"Error: cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1

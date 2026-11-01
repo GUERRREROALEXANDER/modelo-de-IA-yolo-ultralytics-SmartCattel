@@ -13,7 +13,9 @@ import numpy as np
 
 from .backend_client import BackendError, occupancy_report
 from .media import draw_detections
+from .discovery import scan_cameras
 from .rules import evaluate
+from .stream import camera_url_from_env, normalize_source, redact_url
 from .zones import ZoneSet, as_zone_set
 
 DEFAULT_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173",
@@ -314,7 +316,38 @@ def zone_sync_worker(client, state: LiveState, fallback: ZoneSet, stop: Event, i
         stop.wait(interval_s)
 
 
-def make_handler(state: LiveState, stop: Event, allowed_origins):
+MAX_CAMERA_BODY = 4096
+
+
+def camera_source_from_request(body: dict) -> str:
+    """The stream URL for a POST /camera body: a full URL or phone-app address, or an IP camera's parts.
+
+    {"url": "192.168.1.20:8080"}  or  {"host": "192.168.1.30", "username": "admin", "password": "...",
+    "port": 554, "path": "/cam/realmonitor?channel=1&subtype=1"}
+    """
+    url = body.get("url")
+    if isinstance(url, str) and url.strip():
+        return normalize_source(url)
+    host = body.get("host")
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("Send the camera's IP address (host) or a stream url")
+    password = body.get("password")
+    if not isinstance(password, str) or not password:
+        raise ValueError("Send the camera password")
+    username = body.get("username")
+    port = body.get("port")
+    path = body.get("path")
+    env = {
+        "CAMERA_HOST": host,
+        "CAMERA_USERNAME": username if isinstance(username, str) and username.strip() else "admin",
+        "CAMERA_PASSWORD": password,
+        "CAMERA_RTSP_PORT": str(port) if isinstance(port, int) and 0 < port < 65536 else "",
+        "CAMERA_RTSP_PATH": path if isinstance(path, str) else "",
+    }
+    return camera_url_from_env(env)
+
+
+def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None):
     origins = {origin.rstrip("/") for origin in allowed_origins}
 
     class Handler(BaseHTTPRequestHandler):
@@ -355,8 +388,54 @@ def make_handler(state: LiveState, stop: Event, allowed_origins):
                 self._stream()
             elif path == "/heatmap.jpg":
                 self._heatmap()
+            elif path == "/cameras/scan":
+                # The scan reveals what is on the LAN, so like POST /camera it answers the dashboard only.
+                if self.headers.get("Origin", "").rstrip("/") not in origins:
+                    self._json(403, {"detail": "Origin not allowed"})
+                else:
+                    self._json(200, scan_cameras())
             else:
                 self._json(404, {"detail": "Not found"})
+
+        def do_OPTIONS(self):
+            # Preflight for POST /camera with a JSON body.
+            self.send_response(204)
+            self._cors()
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.end_headers()
+
+        def do_POST(self):
+            if self.path.split("?", 1)[0] != "/camera":
+                self._json(404, {"detail": "Not found"})
+                return
+            # Only the dashboard may point the service at a camera: the body carries its password.
+            if self.headers.get("Origin", "").rstrip("/") not in origins:
+                self._json(403, {"detail": "Origin not allowed"})
+                return
+            if camera is None:
+                self._json(503, {"detail": "This service cannot change cameras"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length <= 0 or length > MAX_CAMERA_BODY:
+                self._json(400, {"detail": "Send a JSON body"})
+                return
+            try:
+                body = json.loads(self.rfile.read(length))
+                if not isinstance(body, dict):
+                    raise ValueError("Send a JSON object")
+                source = camera_source_from_request(body)
+            except ValueError as error:  # json.JSONDecodeError is a ValueError
+                self._json(422, {"detail": str(error)})
+                return
+            camera.switch(source)
+            state.set_camera_status("connecting")
+            # Never echo the URL back: it holds the camera credentials.
+            self._json(202, {"status": "connecting", "camera": redact_url(source)})
 
         def _heatmap(self) -> None:
             """Where the cattle have stood since the service started, over the latest frame."""
@@ -396,7 +475,8 @@ def make_handler(state: LiveState, stop: Event, allowed_origins):
     return Handler
 
 
-def make_server(state: LiveState, stop: Event, host: str, port: int, allowed_origins=DEFAULT_ORIGINS):
-    server = ThreadingHTTPServer((host, port), make_handler(state, stop, allowed_origins))
+def make_server(state: LiveState, stop: Event, host: str, port: int, allowed_origins=DEFAULT_ORIGINS, camera=None):
+    """camera, when given, is the CameraStream that POST /camera re-points (see CameraStream.switch)."""
+    server = ThreadingHTTPServer((host, port), make_handler(state, stop, allowed_origins, camera))
     server.daemon_threads = True
     return server
