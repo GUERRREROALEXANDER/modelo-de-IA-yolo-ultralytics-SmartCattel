@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from threading import Event, Thread
@@ -11,23 +12,35 @@ from smartcattle_ai.backend_client import BackendClient, BackendError, EventThro
 from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
 from smartcattle_ai.live import (
-    DEFAULT_ORIGINS, LatestFrame, LiveState, capture_worker, detection_worker, make_server, status_worker,
+    DEFAULT_ORIGINS, LatestFrame, LiveState, capture_worker, detection_worker, make_server, occupancy_worker,
+    status_worker, zone_sync_worker,
 )
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
-from smartcattle_ai.stream import CameraStream, camera_url_from_env, redact_url
+from smartcattle_ai.stream import CameraStream, camera_url_from_env, normalize_source, redact_url
+from smartcattle_ai.tracking import IoUTracker
 from smartcattle_ai.tunnel import QuickTunnel, find_cloudflared
+from smartcattle_ai.zones import ZoneSet
+
+CAMERA_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def main(argv=None) -> int:
     load_env_file()
     parser = argparse.ArgumentParser(description="Live camera detection served as MJPEG.")
-    parser.add_argument("--url", help="Stream URL (default: the Imou cloud if IMOU_APP_ID is set, "
-                                      "else CAMERA_RTSP_URL or CAMERA_* variables)")
+    parser.add_argument("--url", help="Stream URL (rtsp://, http://), a phone camera app's address "
+                                      "(192.168.1.20:8080) or a webcam index (0, 1). Default: the Imou cloud "
+                                      "if IMOU_APP_ID is set, else CAMERA_URL, CAMERA_RTSP_URL or CAMERA_* variables")
     parser.add_argument("--camera-id", default=os.getenv("CAMERA_ID") or os.getenv("SMARTCATTLE_CAMERA_ID") or "camera-01")
     parser.add_argument("--zone", default=os.getenv("SMARTCATTLE_ZONE") or "0.1,0.1,0.9,0.9")
     parser.add_argument("--backend-url", default=os.getenv("SMARTCATTLE_BACKEND_URL"))
     parser.add_argument("--event-cooldown", type=float, default=10.0)
     parser.add_argument("--status-interval", type=float, default=15.0)
+    parser.add_argument("--occupancy-interval", type=float, default=1.0,
+                        help="Seconds between head counts sent to the backend")
+    parser.add_argument("--zone-sync-interval", type=float, default=30.0,
+                        help="Seconds between reloads of the safe zones drawn in the dashboard")
+    parser.add_argument("--no-tracking", action="store_true",
+                        help="Do not number animals across frames (one alert per cooldown instead of per escape)")
     parser.add_argument("--host", default=os.getenv("SMARTCATTLE_LIVE_HOST") or "127.0.0.1")
     # PORT is what hosts such as Render assign to the service.
     parser.add_argument("--port", type=int,
@@ -42,10 +55,15 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        url = args.url or (imou_url_provider() if imou_configured() else camera_url_from_env())
-        zone = parse_zone(args.zone)
-        if not 1 <= len(args.camera_id) <= 64:
-            raise ValueError("camera-id must contain 1 to 64 characters")
+        url = normalize_source(args.url) if args.url else (
+            imou_url_provider() if imou_configured() else camera_url_from_env())
+        zone = ZoneSet.from_rectangle(parse_zone(args.zone))
+        if not CAMERA_ID.fullmatch(args.camera_id):
+            # The backend's rule for camera ids; anything else would be a 422 on every report.
+            raise ValueError("camera-id must be 1 to 64 letters, digits, '-' or '_'")
+        for name in ("occupancy_interval", "zone_sync_interval", "status_interval"):
+            if getattr(args, name) <= 0:
+                raise ValueError(f"--{name.replace('_', '-')} must be positive")
         detector = Detector(Settings.from_env())
         detector.class_ids  # Load the model now, not on the first frame.
     except (ValueError, RuntimeError, OSError) as exc:
@@ -73,7 +91,13 @@ def main(argv=None) -> int:
             print(f"Warning: backend not reachable yet ({exc}); retrying in the background", file=sys.stderr)
         publisher = EventPublisher(client, args.camera_id, zone, EventThrottle(args.event_cooldown))
         workers.append(Thread(target=status_worker, args=(client, state, stop, args.status_interval), daemon=True))
-    workers.append(Thread(target=detection_worker, args=(detector, frames, state, stop, publisher), daemon=True))
+        workers.append(Thread(target=occupancy_worker, args=(client, state, stop, args.occupancy_interval),
+                              daemon=True))
+        workers.append(Thread(target=zone_sync_worker,
+                              args=(client, state, zone, stop, args.zone_sync_interval, publisher), daemon=True))
+    tracker = None if args.no_tracking else IoUTracker()
+    workers.append(Thread(target=detection_worker, args=(detector, frames, state, stop, publisher),
+                          kwargs={"tracker": tracker}, daemon=True))
 
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
     try:

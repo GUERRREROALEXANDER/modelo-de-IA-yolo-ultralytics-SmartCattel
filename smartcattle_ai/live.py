@@ -1,4 +1,5 @@
-"""Live camera service: YOLO on the camera stream, MJPEG and JSON over HTTP, status and events to the backend."""
+"""Live camera service: YOLO on the camera stream, MJPEG and JSON over HTTP; status, head count,
+escapes and safe zones exchanged with the backend."""
 
 import json
 import sys
@@ -9,9 +10,10 @@ from threading import Condition, Event
 
 import cv2
 
-from .backend_client import BackendError
+from .backend_client import BackendError, occupancy_report
 from .media import draw_detections
 from .rules import evaluate
+from .zones import ZoneSet, as_zone_set
 
 DEFAULT_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173",
                    "http://localhost:4173", "http://127.0.0.1:4173")
@@ -41,9 +43,10 @@ class LatestFrame:
 class LiveState:
     """Latest annotated JPEG and detections, shared by the worker and every HTTP client."""
 
-    def __init__(self, camera_id: str, zone: tuple, public_url: str | None = None):
+    def __init__(self, camera_id: str, zone, public_url: str | None = None):
         self.camera_id = camera_id
-        self.zone = zone
+        # Replaced as a whole when the dashboard's zones arrive; readers take one reference, never half of one.
+        self.zone = as_zone_set(zone)
         # Base URL where browsers reach this server (e.g. a tunnel); reported to the backend while online.
         self.public_url = public_url
         self._cond = Condition()
@@ -88,13 +91,16 @@ class LiveState:
                 "camera_id": self.camera_id, "status": self._status, "error": self._error,
                 "width": self._size[0] if self._size else None,
                 "height": self._size[1] if self._size else None,
-                "fps": self._fps, "zone": list(self.zone),
+                "fps": self._fps,
+                # "zone" is the first rectangle, kept for clients written before zones came from the backend.
+                "zone": list(self.zone.describe()[0]["rect"]), "zones": self.zone.describe(),
+                "zone_source": self.zone.source,
                 "captured_at": self._captured_at.isoformat() if self._captured_at else None,
                 "detections": self._detections,
             }
 
 
-def classify_zone(detections: list[dict], width: int, height: int, zone: tuple) -> list[dict]:
+def classify_zone(detections: list[dict], width: int, height: int, zone) -> list[dict]:
     """Cows get inside_zone; persons get None because the safe zone only applies to cattle."""
     cows, _ = evaluate([item for item in detections if item["class"] == "cow"], width, height, zone)
     others = [{**item, "inside_zone": None} for item in detections if item["class"] != "cow"]
@@ -102,7 +108,7 @@ def classify_zone(detections: list[dict], width: int, height: int, zone: tuple) 
 
 
 def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Event,
-                     publisher=None, jpeg_quality: int = 80) -> None:
+                     publisher=None, jpeg_quality: int = 80, tracker=None) -> None:
     fps = None
     last = None
     while not stop.is_set():
@@ -110,10 +116,14 @@ def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Even
         if frame is None:
             continue
         height, width = frame.shape[:2]
-        detections = classify_zone(detector.detect(frame), width, height, state.zone)
+        zone = state.zone
+        detections = detector.detect(frame)
+        if tracker is not None:
+            detections = tracker.update(detections)
+        detections = classify_zone(detections, width, height, zone)
         if publisher is not None:
             publisher.handle(detections, width, height, time.time())
-        ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, state.zone),
+        ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, zone),
                                    [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         now = time.monotonic()
         if last is not None and now > last:
@@ -171,6 +181,64 @@ def status_worker(client, state: LiveState, stop: Event, interval_s: float) -> N
                     print(f"Warning: could not report camera status: {exc}", file=sys.stderr)
                 warned = True
         stop.wait(1.0)
+
+
+def occupancy_worker(client, state: LiveState, stop: Event, interval_s: float) -> None:
+    """Sends the latest head count, at most every interval_s and only for a frame not sent yet.
+
+    A separate thread, so a slow backend never slows detection down. The backend
+    keeps one sample per minute for history and pushes every report to the
+    open dashboards, so a second is a good default.
+    """
+    warned = False
+    last_sent = None
+    while not stop.wait(interval_s):
+        snapshot = state.snapshot()
+        captured_at = snapshot["captured_at"]
+        if snapshot["status"] != "online" or captured_at is None or captured_at == last_sent:
+            continue
+        report = occupancy_report(snapshot["detections"], snapshot["width"], snapshot["height"], captured_at)
+        last_sent = captured_at
+        try:
+            client.report_occupancy(state.camera_id, report)
+            warned = False
+        except BackendError as exc:
+            if not warned:
+                print(f"Warning: could not report the head count: {exc}", file=sys.stderr)
+            warned = True
+
+
+def sync_zones(client, state: LiveState, fallback: ZoneSet, publisher=None) -> bool:
+    """Loads the camera's zones from the backend once; True if they changed.
+
+    No active zone in the dashboard means the configured one (--zone) applies:
+    a camera with no zone at all would call every animal an escape.
+    """
+    zones = ZoneSet.from_backend(client.camera_zones(state.camera_id)) or fallback
+    if zones == state.zone:
+        return False
+    state.zone = zones
+    if publisher is not None:
+        publisher.zone = zones
+    names = ", ".join(area.name or "unnamed" for area in zones.areas)
+    print(f"Safe zones from {zones.source}: {names}", flush=True)
+    return True
+
+
+def zone_sync_worker(client, state: LiveState, fallback: ZoneSet, stop: Event, interval_s: float,
+                     publisher=None) -> None:
+    """Polls the dashboard's zones, so drawing a new one applies within interval_s, without a restart."""
+    warned = False
+    while not stop.is_set():
+        try:
+            sync_zones(client, state, fallback, publisher)
+            warned = False
+        except (BackendError, KeyError, TypeError, ValueError) as exc:
+            # The zone in use stays: a backend that is down must not erase it.
+            if not warned:
+                print(f"Warning: could not load safe zones: {exc}", file=sys.stderr)
+            warned = True
+        stop.wait(interval_s)
 
 
 def make_handler(state: LiveState, stop: Event, allowed_origins):
