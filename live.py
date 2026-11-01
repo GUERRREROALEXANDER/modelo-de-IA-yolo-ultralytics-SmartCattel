@@ -15,6 +15,7 @@ from smartcattle_ai.live import (
     DEFAULT_ORIGINS, LatestFrame, LiveState, capture_worker, detection_worker, make_server, occupancy_worker,
     status_worker, zone_sync_worker,
 )
+from smartcattle_ai.line_counter import LineCounter, parse_line
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
 from smartcattle_ai.stream import CameraStream, camera_url_from_env, normalize_source, redact_url
 from smartcattle_ai.stillness import StillnessMonitor
@@ -42,6 +43,8 @@ def main(argv=None) -> int:
                         help="Seconds between reloads of the safe zones drawn in the dashboard")
     parser.add_argument("--still-after-minutes", type=float, default=30.0,
                         help="Warn about a cow that has not moved for this long (0 turns it off)")
+    parser.add_argument("--gate-line", default=os.getenv("SMARTCATTLE_GATE_LINE") or None,
+                        help="Count cattle crossing the line x1,y1,x2,y2 (fractions of the frame), e.g. a gate")
     parser.add_argument("--no-tracking", action="store_true",
                         help="Do not number animals across frames (one alert per cooldown instead of per escape)")
     parser.add_argument("--host", default=os.getenv("SMARTCATTLE_LIVE_HOST") or "127.0.0.1")
@@ -64,6 +67,9 @@ def main(argv=None) -> int:
         if not CAMERA_ID.fullmatch(args.camera_id):
             # The backend's rule for camera ids; anything else would be a 422 on every report.
             raise ValueError("camera-id must be 1 to 64 letters, digits, '-' or '_'")
+        gate_line = parse_line(args.gate_line) if args.gate_line else None
+        if gate_line is not None and args.no_tracking:
+            raise ValueError("--gate-line needs tracking; remove --no-tracking")
         if args.still_after_minutes < 0:
             raise ValueError("--still-after-minutes must be 0 or more")
         for name in ("occupancy_interval", "zone_sync_interval", "status_interval"):
@@ -76,6 +82,8 @@ def main(argv=None) -> int:
         return 1
 
     state = LiveState(args.camera_id, zone, args.public_url.rstrip("/") if args.public_url else None)
+    if gate_line is not None:
+        state.gate = LineCounter(gate_line)
     stop = Event()
     frames = LatestFrame()
     # Short backoff so a camera that comes back is picked up within seconds.

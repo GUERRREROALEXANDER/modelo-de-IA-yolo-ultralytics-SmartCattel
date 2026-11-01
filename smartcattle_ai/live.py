@@ -47,6 +47,8 @@ class LiveState:
         self.camera_id = camera_id
         # Replaced as a whole when the dashboard's zones arrive; readers take one reference, never half of one.
         self.zone = as_zone_set(zone)
+        # Optional gate line counter (--gate-line); only the detection thread updates it.
+        self.gate = None
         # Base URL where browsers reach this server (e.g. a tunnel); reported to the backend while online.
         self.public_url = public_url
         self._cond = Condition()
@@ -95,6 +97,7 @@ class LiveState:
                 # "zone" is the first rectangle, kept for clients written before zones came from the backend.
                 "zone": list(self.zone.describe()[0]["rect"]), "zones": self.zone.describe(),
                 "zone_source": self.zone.source,
+                "gate": self.gate.describe() if self.gate is not None else None,
                 "captured_at": self._captured_at.isoformat() if self._captured_at else None,
                 "detections": self._detections,
             }
@@ -138,9 +141,13 @@ def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Even
         detections = classify_zone(detections, width, height, zone)
         if stillness is not None:
             detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
+        if state.gate is not None:
+            for crossing in state.gate.update(detections, width, height, time.time()):
+                print(f"Gate: cow #{crossing['track_id']} went {crossing['direction']} "
+                      f"(in {state.gate.entered}, out {state.gate.exited})", flush=True)
         if publisher is not None:
             publisher.handle(detections, width, height, time.time())
-        ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, zone),
+        ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, zone, state.gate),
                                    [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         now = time.monotonic()
         if last is not None and now > last:

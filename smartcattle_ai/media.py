@@ -21,7 +21,7 @@ def read_image(path) -> np.ndarray:
     return frame
 
 
-def draw_detections(frame: np.ndarray, detections: list[dict], zone=None) -> np.ndarray:
+def draw_detections(frame: np.ndarray, detections: list[dict], zone=None, gate=None) -> np.ndarray:
     annotated = frame.copy()
     if zone is not None:
         height, width = frame.shape[:2]
@@ -45,6 +45,13 @@ def draw_detections(frame: np.ndarray, detections: list[dict], zone=None) -> np.
             label += f' STILL {int(detection.get("still_for_s", 0) // 60)}m'
         cv2.putText(annotated, label, (x1, max(y1 - 5, 12)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+    if gate is not None:
+        height, width = frame.shape[:2]
+        x1, y1, x2, y2 = gate.line
+        cv2.line(annotated, (round(x1 * width), round(y1 * height)), (round(x2 * width), round(y2 * height)),
+                 (0, 255, 255), 2)
+        cv2.putText(annotated, f"In: {gate.entered} | Out: {gate.exited}", (10, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     cattle = sum(item["class"] == "cow" for item in detections)
     persons = sum(item["class"] == "person" for item in detections)
     cv2.putText(annotated, f"Cattle: {cattle} | Persons: {persons}", (10, 25),
