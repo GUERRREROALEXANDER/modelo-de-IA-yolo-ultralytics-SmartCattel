@@ -107,8 +107,23 @@ def classify_zone(detections: list[dict], width: int, height: int, zone) -> list
     return sorted(cows + others, key=lambda item: item["confidence"], reverse=True)
 
 
+def mark_still(stillness, detections: list[dict], width: int, height: int, now: float,
+               camera_id: str) -> list[dict]:
+    """Adds still_for_s to tracked cows, and still=True once past the limit; warns once per still period.
+
+    The backend has no event type for this yet, so the warning stays here: on the
+    video, in /status and in the console.
+    """
+    detections = stillness.update(detections, width, height, now)
+    for track_id in stillness.new_alerts(detections):
+        minutes = round(stillness.still_after_s / 60)
+        print(f"Warning: camera {camera_id}, cow #{track_id} has not moved for {minutes} min", flush=True)
+    return [{**item, "still": True} if item.get("still_for_s", 0) >= stillness.still_after_s else item
+            for item in detections]
+
+
 def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Event,
-                     publisher=None, jpeg_quality: int = 80, tracker=None) -> None:
+                     publisher=None, jpeg_quality: int = 80, tracker=None, stillness=None) -> None:
     fps = None
     last = None
     while not stop.is_set():
@@ -121,6 +136,8 @@ def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Even
         if tracker is not None:
             detections = tracker.update(detections)
         detections = classify_zone(detections, width, height, zone)
+        if stillness is not None:
+            detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
         if publisher is not None:
             publisher.handle(detections, width, height, time.time())
         ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, zone),

@@ -17,6 +17,7 @@ from smartcattle_ai.live import (
 )
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
 from smartcattle_ai.stream import CameraStream, camera_url_from_env, normalize_source, redact_url
+from smartcattle_ai.stillness import StillnessMonitor
 from smartcattle_ai.tracking import IoUTracker
 from smartcattle_ai.tunnel import QuickTunnel, find_cloudflared
 from smartcattle_ai.zones import ZoneSet
@@ -39,6 +40,8 @@ def main(argv=None) -> int:
                         help="Seconds between head counts sent to the backend")
     parser.add_argument("--zone-sync-interval", type=float, default=30.0,
                         help="Seconds between reloads of the safe zones drawn in the dashboard")
+    parser.add_argument("--still-after-minutes", type=float, default=30.0,
+                        help="Warn about a cow that has not moved for this long (0 turns it off)")
     parser.add_argument("--no-tracking", action="store_true",
                         help="Do not number animals across frames (one alert per cooldown instead of per escape)")
     parser.add_argument("--host", default=os.getenv("SMARTCATTLE_LIVE_HOST") or "127.0.0.1")
@@ -61,6 +64,8 @@ def main(argv=None) -> int:
         if not CAMERA_ID.fullmatch(args.camera_id):
             # The backend's rule for camera ids; anything else would be a 422 on every report.
             raise ValueError("camera-id must be 1 to 64 letters, digits, '-' or '_'")
+        if args.still_after_minutes < 0:
+            raise ValueError("--still-after-minutes must be 0 or more")
         for name in ("occupancy_interval", "zone_sync_interval", "status_interval"):
             if getattr(args, name) <= 0:
                 raise ValueError(f"--{name.replace('_', '-')} must be positive")
@@ -96,8 +101,11 @@ def main(argv=None) -> int:
         workers.append(Thread(target=zone_sync_worker,
                               args=(client, state, zone, stop, args.zone_sync_interval, publisher), daemon=True))
     tracker = None if args.no_tracking else IoUTracker()
+    # Stillness needs the animal's number, so it is off without tracking.
+    stillness = (StillnessMonitor(still_after_s=args.still_after_minutes * 60)
+                 if tracker is not None and args.still_after_minutes > 0 else None)
     workers.append(Thread(target=detection_worker, args=(detector, frames, state, stop, publisher),
-                          kwargs={"tracker": tracker}, daemon=True))
+                          kwargs={"tracker": tracker, "stillness": stillness}, daemon=True))
 
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
     try:
