@@ -30,7 +30,13 @@ jobs:
           pip install -r requirements-onnx.txt
 
       - name: Unit tests
-        run: python -m pytest -q -m "not real"
+        # Each failing test also becomes an annotation, readable without opening the log.
+        run: |
+          set +e
+          python -m pytest -q -m "not real" -rfE 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          grep -E '^(FAILED|ERROR) ' pytest.log | while read -r line; do echo "::error::$line"; done
+          exit $status
 
       - name: Real inference tests
         # Loads the committed fine-tuned model and downloads yolo11n.pt (about 5 MB) on first use.
