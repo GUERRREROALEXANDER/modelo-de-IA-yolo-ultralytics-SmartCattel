@@ -1,0 +1,4 @@
+# Only needed to export ONNX weights or to run .onnx models.
+onnx>=1.17
+onnxruntime>=1.20
+onnxslim>=0.1
