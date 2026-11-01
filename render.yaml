@@ -25,6 +25,9 @@ services:
         sync: false
       - key: SMARTCATTLE_LIVE_ORIGINS
         value: https://smartcattle-frontend.onrender.com
+      # This server is not on a farm's network: refuse private addresses and webcam numbers with a clear message.
+      - key: SMARTCATTLE_CLOUD
+        value: "1"
       # Smaller input keeps CPU inference near real time on a shared instance.
       - key: SMARTCATTLE_IMGSZ
         value: "416"

@@ -430,6 +430,41 @@ python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091   # ph
 
 A phone on the farm network is reachable only from a PC on that network, so its `live.py` runs on that PC, not on Render. Use `--tunnel` to show its video in a hosted frontend.
 
+### Adding cameras from the dashboard
+
+The **Connect a camera** form on the Cameras page adds a camera next to the ones already running. `live.py` opens it from the farm PC, so a backend in the cloud never needs to reach a private address. All cameras share one process, one model and one port, so they take turns on the CPU, and a PC runs at most 8 added cameras.
+
+| Request | Effect |
+| --- | --- |
+| `POST /cameras` | `{"host": "192.168.1.50", "password": "...", "username": "...", "path": "/live"}` or `{"url": "rtsp://..."}`. Answers `202` with `camera_id` and `stream_url` (`<service>/cameras/<id>`) |
+| `GET /cameras/<id>/status`, `/video.mjpg`, `/snapshot.jpg`, `/heatmap.jpg` | The same as the service's own paths, for that camera |
+| `DELETE /cameras/<id>` | Stops the camera and forgets it |
+
+The saved password of `CAMERA_HOST` is used only for that host; any other address must bring its own. The list and its passwords are kept in `.cameras.json` on this PC (`SMARTCATTLE_CAMERAS_FILE`, ignored by git), so added cameras return after a restart. The backend's database gets the address without credentials (`PUT /api/ai/cameras/{id}/source`), never the password.
+
+**Who may change cameras.** On a PC or a LAN, `POST`, `DELETE` and `/cameras/scan` answer only the origins in `SMARTCATTLE_LIVE_ORIGINS`. With `--tunnel` or a public `--public-url`, `Origin` proves nothing, so they also need a signed-in dashboard session, which `live.py` checks against the backend (`GET /api/auth/me`). Without `SMARTCATTLE_BACKEND_URL` they are refused. The video itself has no login in any of these setups.
+
+**Where each deployment can reach.** `live.py` opens the camera itself, so it only reaches what its own machine reaches:
+
+| `live.py` runs on | Cameras it can add |
+| --- | --- |
+| A PC in the camera's network, optionally with `--tunnel` | Private addresses (`192.168.x.x`), webcams, public addresses |
+| Render (`SMARTCATTLE_CLOUD=1`) | Public addresses only, such as a router's forwarded port. Private addresses get a clear error |
+
+On Render the disk is erased on each deploy, so `.cameras.json` does not survive one: added cameras must be added again unless the service has a persistent disk (`SMARTCATTLE_CAMERAS_FILE=/var/data/cameras.json`).
+
+### Opening the dashboard from another device
+
+Same Wi-Fi: run the three services on every interface, and open `http://<this PC's IP>:5173`.
+
+```powershell
+python live.py --host 0.0.0.0                          # reports http://<this PC's IP>:8090 and allows that origin
+uvicorn app.main:app --host 0.0.0.0 --port 8000        # backend; add http://<this PC's IP>:5173 to ALLOWED_ORIGINS
+npm run dev -- --host 0.0.0.0 --port 5173              # frontend
+```
+
+Anyone on that network can then watch `/video.mjpg`, because the video has no login. From another network, use the hosted frontend with `--tunnel`.
+
 ### Cloud deployment (Imou Open Platform)
 
 With `IMOU_APP_ID`, `IMOU_APP_SECRET` and `IMOU_DEVICE_ID` set, `live.py` skips RTSP and asks the Imou cloud for the camera's HLS live URL (`bindDeviceLive` the first time, then `getLiveStreamInfo` on every reconnect), so it can run anywhere with internet access. The camera must be added to the Imou developer account that owns the app (open.imoulife.com). HLS adds a few seconds of delay compared with RTSP.
