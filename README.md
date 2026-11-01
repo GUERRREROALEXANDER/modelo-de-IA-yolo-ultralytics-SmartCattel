@@ -38,6 +38,7 @@ Details and sources for every number are in [Model and training](#model-and-trai
 │   ├── zones.py                       # Safe zones: rectangles, polygons, several per camera.
 │   ├── tracking.py                    # IoU tracker: one number per animal across frames.
 │   ├── stillness.py                   # Notices a tracked cow that has not moved for a long time.
+│   ├── line_counter.py                # Counts tracked cattle crossing a gate line.
 │   ├── pipeline.py                    # Rule-event publishing, once per escape.
 │   ├── live.py                        # Live service workers: detection, status, head count, zones.
 │   ├── video_jobs.py                  # Uploaded-video worker: claim, download, analyze, report.
@@ -342,7 +343,7 @@ python -m pytest -q
 python -m pytest -q -m real
 ```
 
-The first command runs the whole suite (152 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
+The first command runs the whole suite (179 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, gate counting, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
 
 ## Limitations
 
@@ -373,6 +374,12 @@ With `SMARTCATTLE_BACKEND_URL` set it also:
 - posts an out-of-zone event **once per escape**: each cow gets a number (`track_id`) that follows it from frame to frame, and it is reported when it leaves the zone, not on every frame it stays out. It can be reported again after being seen back inside. `--event-cooldown` still spaces events per camera, so a whole herd walking out becomes a trickle of alerts. `--no-tracking` returns to one event per cooldown.
 
 **A cow that stops moving.** A tracked cow whose center stays within 2 % of the frame for 30 minutes (`--still-after-minutes`, `0` turns it off) may be down, sick or calving. It is drawn in magenta with `STILL <minutes>m`, carries `still: true` and `still_for_s` in `/status`, and the console warns once per still period. Walking restarts the clock. The backend has no event type for it yet, so the warning stays in this service. It needs tracking, so `--no-tracking` turns it off too.
+
+**Counting through a gate.** `--gate-line x1,y1,x2,y2` (or `SMARTCATTLE_GATE_LINE`), in fractions of the frame, draws a yellow line, for example across a gate or a corridor, and counts each tracked cow that walks across it, once per crossing. A cow that walks around the end of the line is not counted. Which way is "in" depends on the order of the two points: for a line drawn top to bottom (`0.5,0,0.5,1`), walking from the right half of the image to the left half is "in". Swap the two points to reverse it. The totals are drawn on the video, returned as `gate` in `/status` and printed in the console. They start at zero when the service starts and are not sent to the backend. The counter needs tracking.
+
+```powershell
+python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091 --gate-line 0.5,0,0.5,1
+```
 
 A backend that is down does not stop the video. `/status` also returns `zones` (every zone with its outline) and `zone_source` (`backend` or `config`). `/status` allows CORS only from `SMARTCATTLE_LIVE_ORIGINS` (default: local Vite ports). It listens on `127.0.0.1` unless `--host 0.0.0.0` is given.
 
