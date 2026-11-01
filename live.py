@@ -15,6 +15,7 @@ from smartcattle_ai.live import (
     DEFAULT_ORIGINS, LatestFrame, LiveState, VisitorLog, capture_worker, detection_worker, make_server, occupancy_worker,
     status_worker, zone_sync_worker,
 )
+from smartcattle_ai.heatmap import HeatMap
 from smartcattle_ai.line_counter import LineCounter, parse_line
 from smartcattle_ai.night_watch import NightWatch, parse_window
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
@@ -50,6 +51,8 @@ def main(argv=None) -> int:
                         help="Warn about people seen in this local window, e.g. 20:00-05:30")
     parser.add_argument("--timezone", default=os.getenv("SMARTCATTLE_TIMEZONE") or "America/Bogota",
                         help="Time zone of --night-window")
+    parser.add_argument("--no-heatmap", action="store_true",
+                        help="Do not keep the heat map served at /heatmap.jpg")
     parser.add_argument("--no-tracking", action="store_true",
                         help="Do not number animals across frames (one alert per cooldown instead of per escape)")
     parser.add_argument("--host", default=os.getenv("SMARTCATTLE_LIVE_HOST") or "127.0.0.1")
@@ -92,6 +95,8 @@ def main(argv=None) -> int:
     state = LiveState(args.camera_id, zone, args.public_url.rstrip("/") if args.public_url else None)
     if gate_line is not None:
         state.gate = LineCounter(gate_line)
+    if not args.no_heatmap:
+        state.heat = HeatMap()
     stop = Event()
     frames = LatestFrame()
     # Short backoff so a camera that comes back is picked up within seconds.
@@ -152,6 +157,8 @@ def main(argv=None) -> int:
     print(f"Camera {args.camera_id}: {redact_url(str(url))}")
     print(f"Backend: {args.backend_url or 'disabled'}")
     print(f"Video: {base}/video.mjpg  Status: {base}/status  (Ctrl+C to stop)")
+    if state.heat is not None:
+        print(f"Heat map: {base}/heatmap.jpg")
     if state.public_url:
         print(f"Public video: {state.public_url}/video.mjpg")
     try:

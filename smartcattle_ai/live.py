@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Condition, Event
 
 import cv2
+import numpy as np
 
 from .backend_client import BackendError, occupancy_report
 from .media import draw_detections
@@ -49,6 +50,8 @@ class LiveState:
         self.zone = as_zone_set(zone)
         # Optional gate line counter (--gate-line); only the detection thread updates it.
         self.gate = None
+        # Optional heat map; the detection thread adds to it, /heatmap.jpg reads a copy of its grid.
+        self.heat = None
         # Base URL where browsers reach this server (e.g. a tunnel); reported to the backend while online.
         self.public_url = public_url
         self._cond = Condition()
@@ -98,6 +101,7 @@ class LiveState:
                 "zone": list(self.zone.describe()[0]["rect"]), "zones": self.zone.describe(),
                 "zone_source": self.zone.source,
                 "gate": self.gate.describe() if self.gate is not None else None,
+                "heatmap_samples": self.heat.samples if self.heat is not None else None,
                 "captured_at": self._captured_at.isoformat() if self._captured_at else None,
                 "detections": self._detections,
             }
@@ -184,6 +188,8 @@ def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Even
             for item in visitors.new(detections):
                 print(f"Warning: camera {state.camera_id}, {item['class']} #{item['track_id']} in view "
                       f"({item['confidence']:.2f})", flush=True)
+        if state.heat is not None:
+            state.heat.add(detections, width, height)
         if state.gate is not None:
             for crossing in state.gate.update(detections, width, height, time.time()):
                 print(f"Gate: cow #{crossing['track_id']} went {crossing['direction']} "
@@ -347,8 +353,26 @@ def make_handler(state: LiveState, stop: Event, allowed_origins):
                     self._send(200, jpeg, "image/jpeg")
             elif path == "/video.mjpg":
                 self._stream()
+            elif path == "/heatmap.jpg":
+                self._heatmap()
             else:
                 self._json(404, {"detail": "Not found"})
+
+        def _heatmap(self) -> None:
+            """Where the cattle have stood since the service started, over the latest frame."""
+            if state.heat is None:
+                self._json(404, {"detail": "Heat map is off"})
+                return
+            jpeg = state.latest_jpeg()
+            if jpeg is None:
+                self._json(503, {"detail": "No frame yet"})
+                return
+            frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+            ok, encoded = cv2.imencode(".jpg", state.heat.overlay(frame))
+            if not ok:
+                self._json(500, {"detail": "Could not encode the heat map"})
+                return
+            self._send(200, encoded.tobytes(), "image/jpeg")
 
         def _stream(self) -> None:
             self.send_response(200)
