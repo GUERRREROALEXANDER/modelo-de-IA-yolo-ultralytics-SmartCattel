@@ -17,6 +17,11 @@ def redact_url(text: str) -> str:
     return _CREDENTIALS.sub("***:***@", str(text))
 
 
+def address_only(source: str) -> str:
+    """The source with no credentials at all: what may leave this PC, unlike redact_url's masked form."""
+    return _CREDENTIALS.sub("", str(source))
+
+
 def is_device_index(source) -> bool:
     """'0', '1', ...: a camera attached to this PC, rather than a network stream."""
     return isinstance(source, str) and source.strip().isdecimal()

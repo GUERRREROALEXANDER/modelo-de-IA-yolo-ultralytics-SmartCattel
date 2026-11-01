@@ -12,6 +12,18 @@ class BackendError(Exception):
         self.status = status
 
 
+def session_is_valid(base_url: str, authorization: str, timeout: float = 5.0) -> bool:
+    """Asks the backend whether this Authorization header belongs to a signed-in person."""
+    if not authorization.startswith("Bearer "):
+        return False
+    request = Request(f"{base_url.rstrip('/')}/api/auth/me", headers={"Authorization": authorization})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except (HTTPError, URLError, OSError):
+        return False
+
+
 class BackendClient:
     def __init__(self, base_url: str, api_key: str | None = None, timeout: float = 5.0):
         self.base_url = base_url.rstrip("/")
@@ -55,6 +67,10 @@ class BackendClient:
     def report_camera_status(self, camera_id: str, report: dict) -> dict:
         _, response = self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/status", report, "PUT")
         return response
+
+    def report_camera_source(self, camera_id: str, source: str, active: bool = True) -> None:
+        """Where the camera is reached, for the database. Callers pass it without credentials."""
+        self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/source", {"source": source, "active": active}, "PUT")
 
     def camera_zones(self, camera_id: str) -> list[dict]:
         """The camera's active safe zones, as drawn in the dashboard."""
