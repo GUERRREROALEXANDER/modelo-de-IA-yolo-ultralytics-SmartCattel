@@ -63,13 +63,13 @@ def test_accepts_a_phone_app_address(server_with_camera):
 def test_rejects_other_origins_and_bad_bodies(server_with_camera):
     _, camera, base = server_with_camera
     assert post(base, {"host": "192.168.1.30", "password": "x"}, origin="http://evil.example")[0] == 403
-    assert post(base, {"host": "192.168.1.30"})[0] == 422
+    assert post(base, {"url": ""})[0] == 422
     assert post(base, {})[0] == 422
     assert camera.urls == []
 
 
 def test_source_defaults_to_admin_and_keeps_a_custom_port_and_path():
-    url = camera_source_from_request({"host": "10.0.0.5", "password": "p", "port": 8554, "path": "/live"})
+    url = camera_source_from_request({"host": "10.0.0.5", "password": "p", "port": 8554, "path": "/live"}, defaults={})
     assert url == "rtsp://admin:p@10.0.0.5:8554/live"
 
 
@@ -111,3 +111,14 @@ def test_scan_never_probes_public_networks():
     calls = []
     assert scan_cameras("8.8.8.8", probe=lambda *args: calls.append(args) or False)["cameras"] == []
     assert calls == []
+
+
+def test_only_the_ip_uses_the_credentials_saved_on_this_pc():
+    saved = {"CAMERA_USERNAME": "admin", "CAMERA_PASSWORD": "L2A3B4C5", "CAMERA_RTSP_PATH": "/cam/realmonitor?channel=1&subtype=0"}
+    url = camera_source_from_request({"host": "192.168.100.30"}, defaults=saved)
+    assert url == "rtsp://admin:L2A3B4C5@192.168.100.30:554/cam/realmonitor?channel=1&subtype=0"
+
+
+def test_only_the_ip_without_saved_credentials_asks_for_the_password():
+    with pytest.raises(ValueError, match="password"):
+        camera_source_from_request({"host": "192.168.100.30"}, defaults={})

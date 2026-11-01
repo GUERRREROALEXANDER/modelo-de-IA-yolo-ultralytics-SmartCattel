@@ -2,6 +2,7 @@
 escapes and safe zones exchanged with the backend."""
 
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -319,30 +320,38 @@ def zone_sync_worker(client, state: LiveState, fallback: ZoneSet, stop: Event, i
 MAX_CAMERA_BODY = 4096
 
 
-def camera_source_from_request(body: dict) -> str:
+def camera_source_from_request(body: dict, defaults=None) -> str:
     """The stream URL for a POST /camera body: a full URL or phone-app address, or an IP camera's parts.
 
     {"url": "192.168.1.20:8080"}  or  {"host": "192.168.1.30", "username": "admin", "password": "...",
     "port": 554, "path": "/cam/realmonitor?channel=1&subtype=1"}
+
+    With only the host, the user, password, port and path come from `defaults` (this PC's .env, the
+    CAMERA_* variables), so a person who already set the camera up here only has to type its IP.
     """
+    defaults = os.environ if defaults is None else defaults
     url = body.get("url")
     if isinstance(url, str) and url.strip():
         return normalize_source(url)
     host = body.get("host")
     if not isinstance(host, str) or not host.strip():
         raise ValueError("Send the camera's IP address (host) or a stream url")
-    password = body.get("password")
-    if not isinstance(password, str) or not password:
-        raise ValueError("Send the camera password")
-    username = body.get("username")
+
+    def given(key: str) -> str:
+        value = body.get(key)
+        return value.strip() if isinstance(value, str) else ""
+
+    password = body.get("password") if isinstance(body.get("password"), str) and body.get("password") else ""
+    password = password or defaults.get("CAMERA_PASSWORD", "")
+    if not password:
+        raise ValueError("This camera needs its password: none is saved on this PC yet")
     port = body.get("port")
-    path = body.get("path")
     env = {
         "CAMERA_HOST": host,
-        "CAMERA_USERNAME": username if isinstance(username, str) and username.strip() else "admin",
+        "CAMERA_USERNAME": given("username") or defaults.get("CAMERA_USERNAME", "").strip() or "admin",
         "CAMERA_PASSWORD": password,
-        "CAMERA_RTSP_PORT": str(port) if isinstance(port, int) and 0 < port < 65536 else "",
-        "CAMERA_RTSP_PATH": path if isinstance(path, str) else "",
+        "CAMERA_RTSP_PORT": str(port) if isinstance(port, int) and 0 < port < 65536 else defaults.get("CAMERA_RTSP_PORT", ""),
+        "CAMERA_RTSP_PATH": given("path") or defaults.get("CAMERA_RTSP_PATH", ""),
     }
     return camera_url_from_env(env)
 
