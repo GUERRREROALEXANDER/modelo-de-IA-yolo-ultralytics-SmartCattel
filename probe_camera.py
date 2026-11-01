@@ -10,7 +10,9 @@ from pathlib import Path
 import cv2
 
 from smartcattle_ai.env import load_env_file
-from smartcattle_ai.stream import CameraStream, camera_url_from_env, host_and_port, redact_url
+from smartcattle_ai.stream import (
+    CameraStream, camera_url_from_env, host_and_port, is_device_index, normalize_source, redact_url,
+)
 
 
 def _step(ok: bool, text: str, quiet: bool) -> None:
@@ -28,7 +30,8 @@ def tcp_check(host: str, port: int, timeout: float = 3.0) -> str | None:
 
 def main(argv=None, stream_factory=CameraStream) -> int:
     parser = argparse.ArgumentParser(description="Probe the camera stream with OpenCV.")
-    parser.add_argument("--url", help="Stream URL (default: CAMERA_RTSP_URL or CAMERA_* variables)")
+    parser.add_argument("--url", help="Stream URL, phone address (192.168.1.20:8080) or webcam index (0, 1); "
+                                      "default: CAMERA_URL, CAMERA_RTSP_URL or CAMERA_* variables")
     parser.add_argument("--duration", type=float, default=10.0, help="Seconds to read frames")
     parser.add_argument("--save-frame", default="outputs/probe_frame.jpg", help="JPEG proof frame ('' to skip)")
     parser.add_argument("--reconnect-test", action="store_true", help="Close and reopen the stream once")
@@ -45,24 +48,27 @@ def main(argv=None, stream_factory=CameraStream) -> int:
         return code
 
     try:
-        url = args.url or camera_url_from_env()
-        host, port = host_and_port(url)
+        url = normalize_source(args.url) if args.url else camera_url_from_env()
+        local = is_device_index(url)
+        host, port = (None, None) if local else host_and_port(url)
     except ValueError as exc:
         summary["error"] = str(exc)
         _step(False, str(exc), quiet)
         return finish(1)
     summary["url"] = redact_url(url)
-    _step(True, f"Stream URL: {summary['url']}", quiet)
+    _step(True, f"Stream URL: {summary['url']}" if not local else f"Camera on this PC, index {url}", quiet)
 
-    error = tcp_check(host, port)
-    summary["tcp"] = error is None
-    if error:
-        summary["error"] = f"TCP {host}:{port} unreachable: {error}"
-        _step(False, summary["error"], quiet)
-        if not quiet:
-            print("  Camera off, wrong IP, different network/AP isolation, or RTSP disabled in Imou Life.")
-        return finish(2)
-    _step(True, f"TCP {host}:{port} reachable", quiet)
+    if not local:
+        error = tcp_check(host, port)
+        summary["tcp"] = error is None
+        if error:
+            summary["error"] = f"TCP {host}:{port} unreachable: {error}"
+            _step(False, summary["error"], quiet)
+            if not quiet:
+                print("  Camera or phone app off, wrong IP, different Wi-Fi network/AP isolation, "
+                      "or RTSP disabled in Imou Life.")
+            return finish(2)
+        _step(True, f"TCP {host}:{port} reachable", quiet)
 
     stream = stream_factory(url)
     if not stream.open():

@@ -17,11 +17,34 @@ def redact_url(text: str) -> str:
     return _CREDENTIALS.sub("***:***@", str(text))
 
 
+def is_device_index(source) -> bool:
+    """'0', '1', ...: a camera attached to this PC, rather than a network stream."""
+    return isinstance(source, str) and source.strip().isdecimal()
+
+
+def normalize_source(value: str) -> str:
+    """Accept what people actually have at hand, and turn it into something OpenCV opens.
+
+    - "0", "1": a webcam, or a phone exposed as one by DroidCam or Iriun on the PC.
+    - A full URL (rtsp://, http://): used as is.
+    - A bare address such as "192.168.1.20:8080", which is what phone camera
+      apps display: read as the MJPEG feed of the IP Webcam app, http://<address>/video.
+      With a path ("192.168.1.20:4747/video"), only the http:// is added.
+    """
+    value = value.strip()
+    if not value:
+        raise ValueError("Camera source is empty")
+    if is_device_index(value) or "://" in value:
+        return value
+    host, slash, path = value.partition("/")
+    return f"http://{host}/{path if slash else 'video'}"
+
+
 def camera_url_from_env(env=os.environ) -> str:
-    """CAMERA_RTSP_URL, or a URL built from CAMERA_HOST/USERNAME/PASSWORD/RTSP_PORT/RTSP_PATH."""
-    url = env.get("CAMERA_RTSP_URL", "").strip()
+    """CAMERA_URL or CAMERA_RTSP_URL, or an RTSP URL built from CAMERA_HOST/USERNAME/PASSWORD/RTSP_PORT/RTSP_PATH."""
+    url = env.get("CAMERA_URL", "").strip() or env.get("CAMERA_RTSP_URL", "").strip()
     if url:
-        return url
+        return normalize_source(url)
     missing = [name for name in ("CAMERA_HOST", "CAMERA_USERNAME", "CAMERA_PASSWORD") if not env.get(name, "").strip()]
     if missing:
         raise ValueError("Camera not configured: set CAMERA_RTSP_URL, or " + ", ".join(missing))
@@ -44,6 +67,9 @@ def is_valid_frame(frame) -> bool:
 
 
 def _open_capture(url: str, open_timeout_s: float, read_timeout_s: float):
+    if is_device_index(url):
+        # DirectShow on Windows: it is the backend DroidCam and Iriun register their virtual webcam with.
+        return cv2.VideoCapture(int(url), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
     # RTSP over TCP: UDP loses packets on Wi-Fi and produces gray, smeared frames.
     os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
     params = [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(open_timeout_s * 1000),
