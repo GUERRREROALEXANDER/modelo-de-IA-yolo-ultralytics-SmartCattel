@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        # The CPU build of PyTorch: the CUDA one is several GB and the runner has no GPU.
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m pytest -q -m "not real"
+
+      - name: Real inference tests
+        # Loads the committed fine-tuned model and downloads yolo11n.pt (about 5 MB) on first use.
+        run: python -m pytest -q -m real
