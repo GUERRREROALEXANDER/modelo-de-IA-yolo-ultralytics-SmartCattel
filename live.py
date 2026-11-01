@@ -8,18 +8,20 @@ from datetime import datetime, timezone
 from threading import Event, Thread
 
 from smartcattle_ai import Detector, Settings
-from smartcattle_ai.backend_client import BackendClient, BackendError, EventThrottle
+from smartcattle_ai.backend_client import BackendClient, BackendError, EventThrottle, session_is_valid
+from smartcattle_ai.camera_manager import CameraManager, ManagedCamera, SharedDetector, is_public_url
 from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
+from smartcattle_ai.discovery import local_ipv4
 from smartcattle_ai.live import (
-    DEFAULT_ORIGINS, LatestFrame, LiveState, VisitorLog, capture_worker, detection_worker, make_server, occupancy_worker,
-    status_worker, zone_sync_worker,
+    DEFAULT_ORIGINS, LatestFrame, LiveState, VisitorLog, capture_worker, detection_worker, lan_origins, make_server,
+    occupancy_worker, source_worker, status_worker, zone_sync_worker,
 )
 from smartcattle_ai.heatmap import HeatMap
 from smartcattle_ai.line_counter import LineCounter, parse_line
 from smartcattle_ai.night_watch import NightWatch, parse_window
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
-from smartcattle_ai.stream import CameraStream, camera_url_from_env, normalize_source, redact_url
+from smartcattle_ai.stream import CameraStream, address_only, camera_url_from_env, normalize_source, redact_url
 from smartcattle_ai.stillness import StillnessMonitor
 from smartcattle_ai.tracking import IoUTracker
 from smartcattle_ai.tunnel import QuickTunnel, find_cloudflared
@@ -78,61 +80,123 @@ def main(argv=None) -> int:
         gate_line = parse_line(args.gate_line) if args.gate_line else None
         if gate_line is not None and args.no_tracking:
             raise ValueError("--gate-line needs tracking; remove --no-tracking")
-        night = NightWatch(parse_window(args.night_window), args.timezone) if args.night_window else None
-        if night is not None and args.no_tracking:
+        night_window = parse_window(args.night_window) if args.night_window else None
+        if night_window is not None:
+            NightWatch(night_window, args.timezone)  # Reject a bad time zone now, not on the first camera.
+        if night_window is not None and args.no_tracking:
             raise ValueError("--night-window needs tracking; remove --no-tracking")
         if args.still_after_minutes < 0:
             raise ValueError("--still-after-minutes must be 0 or more")
         for name in ("occupancy_interval", "zone_sync_interval", "status_interval"):
             if getattr(args, name) <= 0:
                 raise ValueError(f"--{name.replace('_', '-')} must be positive")
-        detector = Detector(Settings.from_env())
-        detector.class_ids  # Load the model now, not on the first frame.
+        model = Detector(Settings.from_env())
+        model.class_ids  # Load the model now, not on the first frame.
     except (ValueError, RuntimeError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    # One model in memory, however many cameras the dashboard adds.
+    detector = SharedDetector(model)
 
-    state = LiveState(args.camera_id, zone, args.public_url.rstrip("/") if args.public_url else None)
-    if gate_line is not None:
-        state.gate = LineCounter(gate_line)
-    if not args.no_heatmap:
-        state.heat = HeatMap()
-    stop = Event()
-    frames = LatestFrame()
-    # Short backoff so a camera that comes back is picked up within seconds.
-    stream = CameraStream(url, max_backoff_s=5)
-
-    def on_camera_state(status, error):
-        state.set_camera_status(status, error)
-        print(f"Camera {status}" + (f": {error}" if error else ""), flush=True)
-
-    stream.on_state_change(on_camera_state)
-    publisher = client = None
-    workers = [Thread(target=capture_worker, args=(stream, frames, stop), daemon=True)]
+    client = None
     if args.backend_url:
         client = BackendClient(args.backend_url, os.getenv("SMARTCATTLE_API_KEY") or None)
         try:
             client.health()
         except BackendError as exc:
             print(f"Warning: backend not reachable yet ({exc}); retrying in the background", file=sys.stderr)
-        publisher = EventPublisher(client, args.camera_id, zone, EventThrottle(args.event_cooldown))
-        workers.append(Thread(target=status_worker, args=(client, state, stop, args.status_interval), daemon=True))
-        workers.append(Thread(target=occupancy_worker, args=(client, state, stop, args.occupancy_interval),
-                              daemon=True))
-        workers.append(Thread(target=zone_sync_worker,
-                              args=(client, state, zone, stop, args.zone_sync_interval, publisher), daemon=True))
-    tracker = None if args.no_tracking else IoUTracker()
-    # Stillness needs the animal's number, so it is off without tracking.
-    stillness = (StillnessMonitor(still_after_s=args.still_after_minutes * 60)
-                 if tracker is not None and args.still_after_minutes > 0 else None)
-    workers.append(Thread(target=detection_worker, args=(detector, frames, state, stop, publisher),
-                          kwargs={"tracker": tracker, "stillness": stillness,
-                                  "visitors": VisitorLog() if tracker is not None else None,
-                                  "night": night}, daemon=True))
 
+    def build_camera(camera_id, source, camera_stop, public_url=None, gate=None):
+        """One camera's state and threads, not started yet."""
+        camera_state = LiveState(camera_id, zone, public_url)
+        camera_state.gate = gate
+        if not args.no_heatmap:
+            camera_state.heat = HeatMap()
+        frames = LatestFrame()
+        # Short backoff so a camera that comes back is picked up within seconds.
+        stream = CameraStream(source, max_backoff_s=5)
+
+        def on_camera_state(status, error):
+            camera_state.set_camera_status(status, error)
+            print(f"Camera {camera_id} {status}" + (f": {error}" if error else ""), flush=True)
+
+        stream.on_state_change(on_camera_state)
+        publisher = None
+        workers = [Thread(target=capture_worker, args=(stream, frames, camera_stop), daemon=True)]
+        if client is not None:
+            publisher = EventPublisher(client, camera_id, zone, EventThrottle(args.event_cooldown))
+            if isinstance(source, str):
+                workers.append(Thread(target=source_worker, args=(client, camera_id, address_only(source), camera_stop),
+                                      daemon=True))
+            workers.append(Thread(target=status_worker, args=(client, camera_state, camera_stop, args.status_interval),
+                                  daemon=True))
+            workers.append(Thread(target=occupancy_worker,
+                                  args=(client, camera_state, camera_stop, args.occupancy_interval), daemon=True))
+            workers.append(Thread(target=zone_sync_worker,
+                                  args=(client, camera_state, zone, camera_stop, args.zone_sync_interval, publisher),
+                                  daemon=True))
+        tracker = None if args.no_tracking else IoUTracker()
+        # Stillness needs the animal's number, so it is off without tracking.
+        stillness = (StillnessMonitor(still_after_s=args.still_after_minutes * 60)
+                     if tracker is not None and args.still_after_minutes > 0 else None)
+        night = NightWatch(night_window, args.timezone) if night_window is not None else None
+        workers.append(Thread(target=detection_worker, args=(detector, frames, camera_state, camera_stop, publisher),
+                              kwargs={"tracker": tracker, "stillness": stillness,
+                                      "visitors": VisitorLog() if tracker is not None else None,
+                                      "night": night}, daemon=True))
+        return camera_state, stream, workers
+
+    def on_camera_removed(camera_id, source):
+        report_offline(camera_id)
+        if client is None:
+            return
+        try:
+            client.report_camera_source(camera_id, address_only(source), active=False)
+        except BackendError as exc:
+            print(f"Warning: could not record the removal of camera {camera_id}: {exc}", file=sys.stderr)
+
+    def report_offline(camera_id):
+        # Lets the frontend drop the camera now instead of after the backend's offline timeout.
+        if client is None:
+            return
+        try:
+            client.report_camera_status(camera_id, {
+                "status": "offline", "observed_at": datetime.now(timezone.utc).isoformat()})
+        except BackendError:
+            pass
+
+    stop = Event()
+    state, stream, workers = build_camera(args.camera_id, url, stop,
+                                          args.public_url.rstrip("/") if args.public_url else None,
+                                          LineCounter(gate_line) if gate_line is not None else None)
+
+    def added_stream_url(camera_id):
+        return f"{state.public_url}/cameras/{camera_id}"
+
+    def start_added_camera(camera_id, source):
+        camera_stop = Event()
+        camera_state, camera_stream, camera_workers = build_camera(camera_id, source, camera_stop,
+                                                                   added_stream_url(camera_id))
+        for worker in camera_workers:
+            worker.start()
+        print(f"Camera {camera_id} added: {redact_url(source)}", flush=True)
+        return ManagedCamera(camera_id, source, camera_state, camera_stream, camera_stop)
+
+    manager = CameraManager(start_added_camera, added_stream_url, on_remove=on_camera_removed,
+                            path=os.getenv("SMARTCATTLE_CAMERAS_FILE") or ".cameras.json")
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
+    # Listening on every interface is how other devices get here, so their browsers must be let in too,
+    # and they must be told this PC's address: "localhost" would mean their own device.
+    lan_address = local_ipv4() if args.host == "0.0.0.0" else None
+    origins += lan_origins(lan_address)
+    session_check = None
+    if args.tunnel or is_public_url(args.public_url):
+        # Reachable from the internet: changing cameras takes a dashboard session. No backend to ask means no one can.
+        session_check = (lambda authorization: session_is_valid(args.backend_url, authorization)) if args.backend_url \
+            else (lambda authorization: False)
     try:
-        server = make_server(state, stop, args.host, args.port, origins, camera=stream)
+        server = make_server(state, stop, args.host, args.port, origins, camera=stream, manager=manager,
+                             session_check=session_check)
     except OSError as exc:
         print(f"Error: cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
@@ -151,9 +215,7 @@ def main(argv=None) -> int:
             print(f"Error: tunnel failed: {exc}", file=sys.stderr)
             server.server_close()
             return 1
-    for worker in workers:
-        worker.start()
-    base = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}"
+    base = f"http://{lan_address or ('localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host)}:{args.port}"
     print(f"Camera {args.camera_id}: {redact_url(str(url))}")
     print(f"Backend: {args.backend_url or 'disabled'}")
     print(f"Video: {base}/video.mjpg  Status: {base}/status  (Ctrl+C to stop)")
@@ -161,6 +223,11 @@ def main(argv=None) -> int:
         print(f"Heat map: {base}/heatmap.jpg")
     if state.public_url:
         print(f"Public video: {state.public_url}/video.mjpg")
+    # Without a public address, the dashboard on this PC still needs to find this service and the cameras it adds.
+    state.public_url = state.public_url or base
+    for worker in workers:
+        worker.start()
+    manager.restore()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
@@ -168,16 +235,12 @@ def main(argv=None) -> int:
     finally:
         stop.set()
         stream.stop()
+        added = manager.stop_all()
         server.server_close()
         if tunnel is not None:
             tunnel.stop()
-        if client is not None:
-            # Lets the frontend drop the camera now instead of after the backend's offline timeout.
-            try:
-                client.report_camera_status(args.camera_id, {
-                    "status": "offline", "observed_at": datetime.now(timezone.utc).isoformat()})
-            except BackendError:
-                pass
+        for camera_id in (args.camera_id, *added):
+            report_offline(camera_id)
     return 0
 
 

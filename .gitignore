@@ -12,3 +12,6 @@ outputs/*.mp4
 venv/
 .uv-cache/
 .env
+# Cameras added from the dashboard, with their passwords.
+.cameras.json
+.cameras.json.tmp

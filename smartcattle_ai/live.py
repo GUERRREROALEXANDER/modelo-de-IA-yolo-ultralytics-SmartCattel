@@ -3,6 +3,7 @@ escapes and safe zones exchanged with the backend."""
 
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ import cv2
 import numpy as np
 
 from .backend_client import BackendError, occupancy_report
+from .camera_manager import CameraLimitError, check_reachable_from_cloud, check_source
 from .media import draw_detections
 from .discovery import scan_cameras
 from .rules import evaluate
@@ -259,6 +261,31 @@ def status_worker(client, state: LiveState, stop: Event, interval_s: float) -> N
         stop.wait(1.0)
 
 
+def source_worker(client, camera_id: str, source: str, stop: Event, retry_s: float = 30.0) -> None:
+    """Records in the backend where this camera is reached, retrying while the backend is down.
+
+    `source` must already be free of credentials. A backend older than this endpoint answers 404: the
+    camera works the same without the record, so that is not retried.
+    """
+    warned = False
+    while not stop.is_set():
+        try:
+            client.report_camera_source(camera_id, source)
+            return
+        except BackendError as exc:
+            if not warned:
+                print(f"Warning: could not record camera {camera_id} in the backend: {exc}", file=sys.stderr)
+            warned = True
+            if exc.status in (404, 405, 422):
+                return
+        stop.wait(retry_s)
+
+
+def lan_origins(address: str | None, ports=(5173, 4173)) -> list[str]:
+    """The dashboard as other devices open it: this PC's address, on the Vite ports."""
+    return [f"http://{address}:{port}" for port in ports] if address else []
+
+
 def occupancy_worker(client, state: LiveState, stop: Event, interval_s: float) -> None:
     """Sends the latest head count, at most every interval_s and only for a frame not sent yet.
 
@@ -318,6 +345,9 @@ def zone_sync_worker(client, state: LiveState, fallback: ZoneSet, stop: Event, i
 
 
 MAX_CAMERA_BODY = 4096
+_CAMERA_HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
+_ADDED_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})(/[a-z.]+)")
+_REMOVE_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})")
 
 
 def camera_source_from_request(body: dict, defaults=None) -> str:
@@ -356,7 +386,27 @@ def camera_source_from_request(body: dict, defaults=None) -> str:
     return camera_url_from_env(env)
 
 
-def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None):
+def new_camera_source(body: dict, defaults=None) -> str:
+    """The stream URL for a POST /cameras body, which adds a camera instead of re-pointing this service's.
+
+    Saved credentials apply only to the host they were saved for: an address typed into the dashboard must
+    never receive another camera's password.
+    """
+    defaults = os.environ if defaults is None else defaults
+    host = body.get("host")
+    if isinstance(host, str) and host.strip():
+        if not _CAMERA_HOST.fullmatch(host.strip()):
+            raise ValueError("That is not a valid IP address or host name")
+        if host.strip() != defaults.get("CAMERA_HOST", "").strip():
+            defaults = {key: value for key, value in defaults.items()
+                        if key not in ("CAMERA_USERNAME", "CAMERA_PASSWORD")}
+    source = check_source(camera_source_from_request(body, defaults))
+    return check_reachable_from_cloud(source) if defaults.get("SMARTCATTLE_CLOUD") == "1" else source
+
+
+def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, manager=None, session_check=None):
+    """session_check(authorization) guards the requests that change cameras or look around the network. It is
+    set when this service can be reached from the internet, where Origin proves nothing: curl can forge it."""
     origins = {origin.rstrip("/") for origin in allowed_origins}
 
     class Handler(BaseHTTPRequestHandler):
@@ -381,27 +431,45 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None):
         def _json(self, status: int, body: dict) -> None:
             self._send(status, json.dumps(body).encode("utf-8"), "application/json")
 
+        def _dashboard_only(self) -> bool:
+            """True if the request may go on; otherwise it has been answered. 403, not 401: a 401 would sign the
+            person out of the dashboard, and here it may only mean this service cannot reach the backend."""
+            if self.headers.get("Origin", "").rstrip("/") not in origins:
+                self._json(403, {"detail": "Origin not allowed"})
+                return False
+            if session_check is not None and not session_check(self.headers.get("Authorization", "")):
+                self._json(403, {"detail": "Sign in to the dashboard to do this"})
+                return False
+            return True
+
         def do_GET(self):
             path = self.path.split("?", 1)[0]
+            # An added camera is served under /cameras/<id>/ with the same paths as the service's own.
+            view, view_stop = state, stop
+            added = _ADDED_CAMERA_PATH.fullmatch(path)
+            if added:
+                entry = manager.get(added.group(1)) if manager is not None else None
+                if entry is None:
+                    self._json(404, {"detail": "Not found"})
+                    return
+                view, view_stop, path = entry.state, entry.stop, added.group(2)
             if path == "/health":
                 self._json(200, {"status": "ok"})
             elif path == "/status":
-                self._json(200, state.snapshot())
+                self._json(200, view.snapshot())
             elif path == "/snapshot.jpg":
-                jpeg = state.latest_jpeg()
+                jpeg = view.latest_jpeg()
                 if jpeg is None:
                     self._json(503, {"detail": "No frame yet"})
                 else:
                     self._send(200, jpeg, "image/jpeg")
             elif path == "/video.mjpg":
-                self._stream()
+                self._stream(view, view_stop)
             elif path == "/heatmap.jpg":
-                self._heatmap()
+                self._heatmap(view)
             elif path == "/cameras/scan":
                 # The scan reveals what is on the LAN, so like POST /camera it answers the dashboard only.
-                if self.headers.get("Origin", "").rstrip("/") not in origins:
-                    self._json(403, {"detail": "Origin not allowed"})
-                else:
+                if self._dashboard_only():
                     self._json(200, scan_cameras())
             else:
                 self._json(404, {"detail": "Not found"})
@@ -410,20 +478,20 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None):
             # Preflight for POST /camera with a JSON body.
             self.send_response(204)
             self._cors()
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
             self.send_header("Access-Control-Max-Age", "600")
             self.end_headers()
 
         def do_POST(self):
-            if self.path.split("?", 1)[0] != "/camera":
+            route = self.path.split("?", 1)[0]
+            if route not in ("/camera", "/cameras"):
                 self._json(404, {"detail": "Not found"})
                 return
             # Only the dashboard may point the service at a camera: the body carries its password.
-            if self.headers.get("Origin", "").rstrip("/") not in origins:
-                self._json(403, {"detail": "Origin not allowed"})
+            if not self._dashboard_only():
                 return
-            if camera is None:
+            if (camera if route == "/camera" else manager) is None:
                 self._json(503, {"detail": "This service cannot change cameras"})
                 return
             try:
@@ -437,32 +505,53 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None):
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):
                     raise ValueError("Send a JSON object")
-                source = camera_source_from_request(body)
+                source = new_camera_source(body) if route == "/cameras" else camera_source_from_request(body)
             except ValueError as error:  # json.JSONDecodeError is a ValueError
                 self._json(422, {"detail": str(error)})
+                return
+            if route == "/cameras":
+                try:
+                    entry = manager.add(source)
+                except CameraLimitError as error:
+                    self._json(409, {"detail": str(error)})
+                    return
+                # Never echo the source: it holds the camera credentials.
+                self._json(202, {"status": "connecting", "camera_id": entry.camera_id,
+                                 "stream_url": manager.stream_url(entry.camera_id)})
                 return
             camera.switch(source)
             state.set_camera_status("connecting")
             # Never echo the URL back: it holds the camera credentials.
             self._json(202, {"status": "connecting", "camera": redact_url(source)})
 
-        def _heatmap(self) -> None:
+        def do_DELETE(self):
+            added = _REMOVE_CAMERA_PATH.fullmatch(self.path.split("?", 1)[0])
+            if not added:
+                self._json(404, {"detail": "Not found"})
+            elif not self._dashboard_only():
+                return
+            elif manager is None or not manager.remove(added.group(1)):
+                self._json(404, {"detail": "This camera was not added from the dashboard"})
+            else:
+                self._json(200, {"status": "removed"})
+
+        def _heatmap(self, view: LiveState) -> None:
             """Where the cattle have stood since the service started, over the latest frame."""
-            if state.heat is None:
+            if view.heat is None:
                 self._json(404, {"detail": "Heat map is off"})
                 return
-            jpeg = state.latest_jpeg()
+            jpeg = view.latest_jpeg()
             if jpeg is None:
                 self._json(503, {"detail": "No frame yet"})
                 return
             frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
-            ok, encoded = cv2.imencode(".jpg", state.heat.overlay(frame))
+            ok, encoded = cv2.imencode(".jpg", view.heat.overlay(frame))
             if not ok:
                 self._json(500, {"detail": "Could not encode the heat map"})
                 return
             self._send(200, encoded.tobytes(), "image/jpeg")
 
-        def _stream(self) -> None:
+        def _stream(self, view: LiveState, view_stop: Event) -> None:
             self.send_response(200)
             self._cors()
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
@@ -470,8 +559,8 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None):
             self.end_headers()
             seq = 0
             try:
-                while not stop.is_set():
-                    item = state.wait_frame(seq, timeout=1.0)
+                while not stop.is_set() and not view_stop.is_set():
+                    item = view.wait_frame(seq, timeout=1.0)
                     if item is None:
                         continue
                     seq, jpeg = item
@@ -484,8 +573,11 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None):
     return Handler
 
 
-def make_server(state: LiveState, stop: Event, host: str, port: int, allowed_origins=DEFAULT_ORIGINS, camera=None):
-    """camera, when given, is the CameraStream that POST /camera re-points (see CameraStream.switch)."""
-    server = ThreadingHTTPServer((host, port), make_handler(state, stop, allowed_origins, camera))
+def make_server(state: LiveState, stop: Event, host: str, port: int, allowed_origins=DEFAULT_ORIGINS, camera=None,
+                manager=None, session_check=None):
+    """camera, when given, is the CameraStream that POST /camera re-points (see CameraStream.switch);
+    manager is the CameraManager behind POST and DELETE /cameras."""
+    server = ThreadingHTTPServer((host, port),
+                                 make_handler(state, stop, allowed_origins, camera, manager, session_check))
     server.daemon_threads = True
     return server
