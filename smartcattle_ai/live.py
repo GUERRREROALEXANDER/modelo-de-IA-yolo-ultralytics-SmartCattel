@@ -110,6 +110,27 @@ def classify_zone(detections: list[dict], width: int, height: int, zone) -> list
     return sorted(cows + others, key=lambda item: item["confidence"], reverse=True)
 
 
+#: Animals worth a console warning when they show up: they can scatter or attack the herd.
+VISITORS = frozenset({"dog", "bear"})
+
+
+class VisitorLog:
+    """Warns once per tracked dog or bear, not once per frame it stays in view."""
+
+    def __init__(self, classes=VISITORS):
+        self.classes = frozenset(classes)
+        self._seen: set[int] = set()
+
+    def new(self, detections: list[dict]) -> list[dict]:
+        found = []
+        for item in detections:
+            track_id = item.get("track_id")
+            if item["class"] in self.classes and track_id is not None and track_id not in self._seen:
+                self._seen.add(track_id)
+                found.append(item)
+        return found
+
+
 def mark_still(stillness, detections: list[dict], width: int, height: int, now: float,
                camera_id: str) -> list[dict]:
     """Adds still_for_s to tracked cows, and still=True once past the limit; warns once per still period.
@@ -126,7 +147,8 @@ def mark_still(stillness, detections: list[dict], width: int, height: int, now: 
 
 
 def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Event,
-                     publisher=None, jpeg_quality: int = 80, tracker=None, stillness=None) -> None:
+                     publisher=None, jpeg_quality: int = 80, tracker=None, stillness=None,
+                     visitors=None) -> None:
     fps = None
     last = None
     while not stop.is_set():
@@ -141,6 +163,10 @@ def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Even
         detections = classify_zone(detections, width, height, zone)
         if stillness is not None:
             detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
+        if visitors is not None:
+            for item in visitors.new(detections):
+                print(f"Warning: camera {state.camera_id}, {item['class']} #{item['track_id']} in view "
+                      f"({item['confidence']:.2f})", flush=True)
         if state.gate is not None:
             for crossing in state.gate.update(detections, width, height, time.time()):
                 print(f"Gate: cow #{crossing['track_id']} went {crossing['direction']} "

@@ -37,7 +37,8 @@ def draw_detections(frame: np.ndarray, detections: list[dict], zone=None, gate=N
         outside = detection.get("inside_zone") is False
         still = detection.get("still") is True
         color = ((0, 0, 255) if outside else (255, 0, 255) if still
-                 else (0, 165, 255) if detection["class"] == "person" else (0, 255, 0))
+                 else (0, 165, 255) if detection["class"] == "person"
+                 else (0, 255, 0) if detection["class"] == "cow" else (255, 255, 0))
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
         track = f' #{detection["track_id"]}' if detection.get("track_id") is not None else ""
         label = f'{detection["class"]}{track} {detection["confidence"]:.2f}' + (" OUT" if outside else "")
@@ -54,7 +55,9 @@ def draw_detections(frame: np.ndarray, detections: list[dict], zone=None, gate=N
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     cattle = sum(item["class"] == "cow" for item in detections)
     persons = sum(item["class"] == "person" for item in detections)
-    cv2.putText(annotated, f"Cattle: {cattle} | Persons: {persons}", (10, 25),
+    others = len(detections) - cattle - persons
+    summary = f"Cattle: {cattle} | Persons: {persons}" + (f" | Other animals: {others}" if others else "")
+    cv2.putText(annotated, summary, (10, 25),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     return annotated
 

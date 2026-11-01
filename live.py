@@ -12,7 +12,7 @@ from smartcattle_ai.backend_client import BackendClient, BackendError, EventThro
 from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
 from smartcattle_ai.live import (
-    DEFAULT_ORIGINS, LatestFrame, LiveState, capture_worker, detection_worker, make_server, occupancy_worker,
+    DEFAULT_ORIGINS, LatestFrame, LiveState, VisitorLog, capture_worker, detection_worker, make_server, occupancy_worker,
     status_worker, zone_sync_worker,
 )
 from smartcattle_ai.line_counter import LineCounter, parse_line
@@ -113,7 +113,8 @@ def main(argv=None) -> int:
     stillness = (StillnessMonitor(still_after_s=args.still_after_minutes * 60)
                  if tracker is not None and args.still_after_minutes > 0 else None)
     workers.append(Thread(target=detection_worker, args=(detector, frames, state, stop, publisher),
-                          kwargs={"tracker": tracker, "stillness": stillness}, daemon=True))
+                          kwargs={"tracker": tracker, "stillness": stillness,
+                                  "visitors": VisitorLog() if tracker is not None else None}, daemon=True))
 
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
     try:
