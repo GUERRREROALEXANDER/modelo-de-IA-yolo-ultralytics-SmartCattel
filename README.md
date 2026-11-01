@@ -327,14 +327,14 @@ For videos, `--event-cooldown` defaults to 10 seconds per camera ID, measured in
 | `SMARTCATTLE_CONF` | `0.35` | Inference confidence; `--conf`. |
 | `SMARTCATTLE_IOU` | `0.5` | Inference NMS IoU; `--iou`. |
 | `SMARTCATTLE_IMGSZ` | `640` | Input size; `--imgsz`. |
-| `SMARTCATTLE_CLASSES` | `cow,person` | Output classes; `--classes`. |
+| `SMARTCATTLE_CLASSES` | `cow,person` | Output classes; `--classes`. Also allowed: `dog`, `horse`, `sheep`, `bear` (see Other animals). |
 | `SMARTCATTLE_DEVICE` | CUDA `0` if available, else `cpu` | Inference device; `--device`. |
 | `SMARTCATTLE_BACKEND_URL` | Unset | Enables publishing; `--backend-url`. |
 | `SMARTCATTLE_API_KEY` | Unset | Event `X-API-Key`; environment only. |
 | `SMARTCATTLE_CAMERA_ID` | `camera-01` | Event camera ID; `--camera-id`. |
 | `SMARTCATTLE_ZONE` | `0.1,0.1,0.9,0.9` | Normalized safe zone; `--zone`. |
 
-If `models/cattle_coco_yolo11n_best.pt` is missing (for example on a fresh clone, since weights are not committed), inference falls back to pretrained `yolo11n.pt`; the `Model:` line shows which one is in use. `--event-cooldown` defaults to 10 seconds and has no environment variable. Settings permit only `cow` and `person`, require confidence and IoU in `(0, 1]`, and require `imgsz` to be at least 32 and divisible by 32.
+If `models/cattle_coco_yolo11n_best.pt` is missing (for example on a fresh clone, since weights are not committed), inference falls back to pretrained `yolo11n.pt`; the `Model:` line shows which one is in use. `--event-cooldown` defaults to 10 seconds and has no environment variable. Settings permit only `cow`, `person`, `dog`, `horse`, `sheep` and `bear`, require confidence and IoU in `(0, 1]`, and require `imgsz` to be at least 32 and divisible by 32.
 
 ## Tests
 
@@ -343,7 +343,7 @@ python -m pytest -q
 python -m pytest -q -m real
 ```
 
-The first command runs the whole suite (179 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, gate counting, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
+The first command runs the whole suite (184 tests), **including** tests marked `real`; the second selects only those. The real tests load YOLO and infer on an Ultralytics sample and, when available, local cattle samples. Other tests cover configuration and default-model selection, class routing, image/video processing, stride, zone boundaries, CLI behavior, a local test backend and its contract, event cooldown, tracking, stillness, gate counting, other farm animals, polygon and multiple zones, head counts, zone reloading, phone and webcam sources, the uploaded-video worker, dataset validation, and metric calculations.
 
 ## Limitations
 
@@ -380,6 +380,8 @@ With `SMARTCATTLE_BACKEND_URL` set it also:
 ```powershell
 python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091 --gate-line 0.5,0,0.5,1
 ```
+
+**Other animals.** The fine-tuned model kept the 80-class COCO head, so it still recognizes dogs (16), horses (17), sheep (18) and bears (21) in the same prediction, at no extra cost. They are off by default; turn them on with `SMARTCATTLE_CLASSES=cow,person,dog,horse`. They are drawn in cyan and counted apart on the video, and they are never counted as cattle, checked against the zone or sent to the backend's head count. A dog or a bear, which can scatter or attack the herd, is announced once per animal in the console. These classes were not part of the fine-tuning data, so their accuracy is COCO's, not measured on farm footage.
 
 A backend that is down does not stop the video. `/status` also returns `zones` (every zone with its outline) and `zone_source` (`backend` or `config`). `/status` allows CORS only from `SMARTCATTLE_LIVE_ORIGINS` (default: local Vite ports). It listens on `127.0.0.1` unless `--host 0.0.0.0` is given.
 
