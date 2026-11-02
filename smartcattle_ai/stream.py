@@ -135,7 +135,10 @@ class CameraStream:
         """A valid BGR frame, or None after marking the stream as failed."""
         if self._capture is None:
             return None
-        ok, frame = self._capture.read()
+        try:
+            ok, frame = self._capture.read()
+        except Exception:  # OpenCV raises cv2.error for some broken streams; a reconnect is the answer to all of them.
+            ok, frame = False, None
         if not ok or not is_valid_frame(frame):
             self._set_state("error", "Stream read failed or returned an invalid frame")
             return None

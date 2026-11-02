@@ -8,7 +8,8 @@ import sys
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Condition, Event
+from threading import Condition, Event, Lock
+from urllib.parse import parse_qs
 
 import cv2
 import numpy as np
@@ -17,6 +18,7 @@ from .backend_client import BackendError, occupancy_report
 from .camera_manager import CameraLimitError, check_reachable_from_cloud, check_source
 from .media import draw_detections
 from .discovery import scan_cameras
+from .limits import RateLimit, SessionCache, StreamSlots, client_address
 from .rules import evaluate
 from .stream import camera_url_from_env, normalize_source, redact_url
 from .zones import ZoneSet, as_zone_set
@@ -49,7 +51,11 @@ class LatestFrame:
 class LiveState:
     """Latest annotated JPEG and detections, shared by the worker and every HTTP client."""
 
+    # Longer than any frame takes, even on a slow CPU with every camera waiting its turn for the model.
+    STALLED_AFTER_S = 180.0
+
     def __init__(self, camera_id: str, zone, public_url: str | None = None):
+        self.working_since: float | None = None
         self.camera_id = camera_id
         # Replaced as a whole when the dashboard's zones arrive; readers take one reference, never half of one.
         self.zone = as_zone_set(zone)
@@ -68,6 +74,11 @@ class LiveState:
         self._fps = None
         self._status = "connecting"
         self._error = None
+
+    def stalled(self, now: float | None = None) -> bool:
+        """A frame has been in the detector for too long. Only a restart gets out of that."""
+        started = self.working_since
+        return started is not None and (time.monotonic() if now is None else now) - started > self.STALLED_AFTER_S
 
     def set_camera_status(self, status: str, error: str | None = None) -> None:
         with self._cond:
@@ -175,48 +186,75 @@ def detection_worker(detector, frames: LatestFrame, state: LiveState, stop: Even
                      visitors=None, night=None, clock=None) -> None:
     fps = None
     last = None
+    failed_with = None
     while not stop.is_set():
         frame = frames.take(timeout=1.0)
         if frame is None:
             continue
-        height, width = frame.shape[:2]
-        zone = state.zone
-        detections = detector.detect(frame)
-        if tracker is not None:
-            detections = tracker.update(detections)
-        detections = classify_zone(detections, width, height, zone)
-        if stillness is not None:
-            detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
-        if night is not None:
-            detections = mark_intruders(night, detections, (clock or _utc_now)(), state.camera_id)
-        if visitors is not None:
-            for item in visitors.new(detections):
-                print(f"Warning: camera {state.camera_id}, {item['class']} #{item['track_id']} in view "
-                      f"({item['confidence']:.2f})", flush=True)
-        if state.heat is not None:
-            state.heat.add(detections, width, height)
-        if state.gate is not None:
-            for crossing in state.gate.update(detections, width, height, time.time()):
-                print(f"Gate: cow #{crossing['track_id']} went {crossing['direction']} "
-                      f"(in {state.gate.entered}, out {state.gate.exited})", flush=True)
-        if publisher is not None:
-            publisher.handle(detections, width, height, time.time())
-        ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, zone, state.gate),
-                                   [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-        now = time.monotonic()
-        if last is not None and now > last:
-            current = 1 / (now - last)
-            fps = round(current if fps is None else 0.8 * fps + 0.2 * current, 2)
-        last = now
-        if ok:
-            state.publish(encoded.tobytes(), detections, width, height, fps)
+        # A worker that dies leaves a frozen picture and a service that says it is fine: one bad frame must not do that.
+        state.working_since = time.monotonic()
+        try:
+            fps, last = _process_frame(frame, detector, state, publisher, jpeg_quality, tracker, stillness, visitors,
+                                       night, clock, fps, last)
+            failed_with = None
+        except Exception as exc:
+            if type(exc) is not failed_with:  # Once per kind of failure, not once per frame.
+                print(f"Warning: camera {state.camera_id}, frame skipped: {type(exc).__name__}", file=sys.stderr,
+                      flush=True)
+            failed_with = type(exc)
+            stop.wait(1.0)
+        finally:
+            state.working_since = None
+
+
+def _process_frame(frame, detector, state, publisher, jpeg_quality, tracker, stillness, visitors, night, clock,
+                   fps, last):
+    height, width = frame.shape[:2]
+    zone = state.zone
+    detections = detector.detect(frame)
+    if tracker is not None:
+        detections = tracker.update(detections)
+    detections = classify_zone(detections, width, height, zone)
+    if stillness is not None:
+        detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
+    if night is not None:
+        detections = mark_intruders(night, detections, (clock or _utc_now)(), state.camera_id)
+    if visitors is not None:
+        for item in visitors.new(detections):
+            print(f"Warning: camera {state.camera_id}, {item['class']} #{item['track_id']} in view "
+                  f"({item['confidence']:.2f})", flush=True)
+    if state.heat is not None:
+        state.heat.add(detections, width, height)
+    if state.gate is not None:
+        for crossing in state.gate.update(detections, width, height, time.time()):
+            print(f"Gate: cow #{crossing['track_id']} went {crossing['direction']} "
+                  f"(in {state.gate.entered}, out {state.gate.exited})", flush=True)
+    if publisher is not None:
+        publisher.handle(detections, width, height, time.time())
+    ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, zone, state.gate),
+                               [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+    now = time.monotonic()
+    if last is not None and now > last:
+        current = 1 / (now - last)
+        fps = round(current if fps is None else 0.8 * fps + 0.2 * current, 2)
+    last = now
+    if ok:
+        state.publish(encoded.tobytes(), detections, width, height, fps)
+    return fps, last
 
 
 def capture_worker(stream, frames: LatestFrame, stop: Event) -> None:
-    for frame in stream.frames():
-        frames.put(frame)
-        if stop.is_set():
+    while not stop.is_set():
+        try:
+            for frame in stream.frames():
+                frames.put(frame)
+                if stop.is_set():
+                    break
             break
+        except Exception as exc:  # The stream reconnects by itself; this is for what it did not foresee.
+            print(f"Warning: camera capture restarted after {type(exc).__name__}", file=sys.stderr, flush=True)
+            stream.release()
+            stop.wait(1.0)
     stream.release()
 
 
@@ -345,6 +383,16 @@ def zone_sync_worker(client, state: LiveState, fallback: ZoneSet, stop: Event, i
 
 
 MAX_CAMERA_BODY = 4096
+# Everything a dashboard does in a minute fits well under these: a preview per camera each second and /status polling.
+MAX_REQUESTS_PER_MINUTE = 1200
+# Each of these makes this service call the backend, or changes what it runs.
+MAX_DASHBOARD_CALLS_PER_MINUTE = 30
+MAX_STREAMS = 32
+MAX_STREAMS_PER_ADDRESS = 12
+MAX_CONNECTIONS = 256
+# A client that stops reading or sending for this long gives its thread back.
+SOCKET_TIMEOUT_S = 20
+VIDEO_PATHS = frozenset({"/video.mjpg", "/snapshot.jpg", "/heatmap.jpg"})
 _CAMERA_HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
 _ADDED_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})(/[a-z.]+)")
 _REMOVE_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})")
@@ -408,10 +456,42 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
     """session_check(authorization) guards the requests that change cameras or look around the network. It is
     set when this service can be reached from the internet, where Origin proves nothing: curl can forge it."""
     origins = {origin.rstrip("/") for origin in allowed_origins}
+    public = session_check is not None
+    session = SessionCache(session_check) if public else None
+    requests = RateLimit(MAX_REQUESTS_PER_MINUTE)
+    dashboard_calls = RateLimit(MAX_DASHBOARD_CALLS_PER_MINUTE)
+    streams = StreamSlots(MAX_STREAMS, MAX_STREAMS_PER_ADDRESS)
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = SOCKET_TIMEOUT_S
+
         def log_message(self, *args):
             pass
+
+        def _address(self) -> str:
+            return client_address(self.headers, self.client_address[0], public)
+
+        def _refused_by(self, limit: RateLimit) -> bool:
+            """True if the address is over this limit; it has then been answered. Only with a public address."""
+            wait = limit.hit(self._address()) if public else 0
+            if wait:
+                self.send_response(429)
+                self._cors()
+                self.send_header("Retry-After", str(wait))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            return bool(wait)
+
+        def _may_watch(self) -> bool:
+            """On the internet the picture is for signed-in people. An <img> cannot send headers, hence the query."""
+            if not public:
+                return True
+            token = parse_qs(self.path.partition("?")[2]).get("token", [""])[0]
+            authorization = f"Bearer {token}" if token else self.headers.get("Authorization", "")
+            if session(authorization):
+                return True
+            self._json(403, {"detail": "Sign in to the dashboard to see this camera"})
+            return False
 
         def _cors(self) -> None:
             origin = self.headers.get("Origin", "").rstrip("/")
@@ -437,13 +517,22 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
             if self.headers.get("Origin", "").rstrip("/") not in origins:
                 self._json(403, {"detail": "Origin not allowed"})
                 return False
-            if session_check is not None and not session_check(self.headers.get("Authorization", "")):
+            if self._refused_by(dashboard_calls):
+                return False
+            if public and not session(self.headers.get("Authorization", "")):
                 self._json(403, {"detail": "Sign in to the dashboard to do this"})
                 return False
             return True
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
+            if path == "/health":
+                # Not rate limited: Render restarts the service when this stops answering.
+                hung = state.stalled() or (manager is not None and manager.any_stalled())
+                self._json(503 if hung else 200, {"status": "stalled" if hung else "ok"})
+                return
+            if self._refused_by(requests):
+                return
             # An added camera is served under /cameras/<id>/ with the same paths as the service's own.
             view, view_stop = state, stop
             added = _ADDED_CAMERA_PATH.fullmatch(path)
@@ -453,6 +542,8 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                     self._json(404, {"detail": "Not found"})
                     return
                 view, view_stop, path = entry.state, entry.stop, added.group(2)
+            if path in VIDEO_PATHS and not self._may_watch():
+                return
             if path == "/health":
                 self._json(200, {"status": "ok"})
             elif path == "/status":
@@ -552,6 +643,20 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
             self._send(200, encoded.tobytes(), "image/jpeg")
 
         def _stream(self, view: LiveState, view_stop: Event) -> None:
+            address = self._address()
+            if not streams.take(address):
+                self.send_response(503)
+                self._cors()
+                self.send_header("Retry-After", "30")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            try:
+                self._send_frames(view, view_stop)
+            finally:
+                streams.give_back(address)
+
+        def _send_frames(self, view: LiveState, view_stop: Event) -> None:
             self.send_response(200)
             self._cors()
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
@@ -567,7 +672,7 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                     self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n"
                                      + f"Content-Length: {len(jpeg)}\r\n\r\n".encode("ascii")
                                      + jpeg + b"\r\n")
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
                 pass
 
     return Handler
@@ -577,7 +682,34 @@ def make_server(state: LiveState, stop: Event, host: str, port: int, allowed_ori
                 manager=None, session_check=None):
     """camera, when given, is the CameraStream that POST /camera re-points (see CameraStream.switch);
     manager is the CameraManager behind POST and DELETE /cameras."""
-    server = ThreadingHTTPServer((host, port),
-                                 make_handler(state, stop, allowed_origins, camera, manager, session_check))
+    server = BoundedHTTPServer((host, port), make_handler(state, stop, allowed_origins, camera, manager, session_check))
     server.daemon_threads = True
     return server
+
+
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """A thread per connection, up to a limit: past it a connection is closed, not given memory it would never free."""
+    request_queue_size = 128
+    block_on_close = False
+
+    def __init__(self, *args, **kwargs):
+        self._active = 0
+        self._active_lock = Lock()
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        with self._active_lock:
+            full = self._active >= MAX_CONNECTIONS
+            if not full:
+                self._active += 1
+        if full:
+            self.shutdown_request(request)
+            return
+        super().process_request(request, client_address)
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._active_lock:
+                self._active -= 1
