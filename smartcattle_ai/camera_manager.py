@@ -9,7 +9,7 @@ import socket
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -140,7 +140,8 @@ class CameraManager:
             self._save()
         self._halt(camera)
         if self._on_remove is not None:
-            self._on_remove(camera_id, camera.source)
+            # It talks to the backend, which may be slow or down: the person is waiting for this answer.
+            Thread(target=self._on_remove, args=(camera_id, camera.source), daemon=True).start()
         return True
 
     def restore(self) -> None:

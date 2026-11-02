@@ -310,3 +310,19 @@ def test_an_exposed_service_accepts_a_signed_in_person(exposed_service):
 def test_watching_an_exposed_service_needs_no_session(exposed_service):
     _, base = exposed_service
     assert call_with(base, "/status", "GET", None) == 200
+
+
+def test_removing_does_not_wait_for_the_backend():
+    release, called = Event(), Event()
+
+    def slow_backend(camera_id, source):
+        release.wait(5)
+        called.set()
+
+    manager = manager_for()
+    manager._on_remove = slow_backend
+    camera = manager.add("rtsp://a/live")
+    assert manager.remove(camera.camera_id) is True
+    assert camera.stop.is_set() and not called.is_set()
+    release.set()
+    assert called.wait(5)
