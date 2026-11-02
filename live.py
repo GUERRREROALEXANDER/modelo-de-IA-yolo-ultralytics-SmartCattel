@@ -9,7 +9,7 @@ from threading import Event, Thread
 
 from smartcattle_ai import Detector, Settings
 from smartcattle_ai.backend_client import BackendClient, BackendError, EventThrottle, session_is_valid
-from smartcattle_ai.camera_manager import CameraManager, ManagedCamera, SharedDetector, is_public_url
+from smartcattle_ai.camera_manager import MAX_CAMERAS, CameraManager, ManagedCamera, SharedDetector, is_public_url
 from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
 from smartcattle_ai.discovery import local_ipv4
@@ -28,6 +28,12 @@ from smartcattle_ai.tunnel import QuickTunnel, find_cloudflared
 from smartcattle_ai.zones import ZoneSet
 
 CAMERA_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def max_added_cameras(env) -> int:
+    """How many cameras the dashboard may add. A server's memory and CPU say how many it can really analyse."""
+    value = env.get("SMARTCATTLE_MAX_CAMERAS", "")
+    return int(value) if value.isdigit() else MAX_CAMERAS
 
 
 def main(argv=None) -> int:
@@ -113,8 +119,9 @@ def main(argv=None) -> int:
         if not args.no_heatmap:
             camera_state.heat = HeatMap()
         frames = LatestFrame()
-        # Short backoff so a camera that comes back is picked up within seconds.
-        stream = CameraStream(source, max_backoff_s=5)
+        # Short backoff so a camera that comes back is picked up within seconds. Not for the Imou cloud (a callable
+        # source): every retry spends calls of its monthly allowance, and a day offline must not use it all up.
+        stream = CameraStream(source, max_backoff_s=5 if isinstance(source, str) else 300)
 
         def on_camera_state(status, error):
             camera_state.set_camera_status(status, error)
@@ -183,7 +190,8 @@ def main(argv=None) -> int:
         return ManagedCamera(camera_id, source, camera_state, camera_stream, camera_stop)
 
     manager = CameraManager(start_added_camera, added_stream_url, on_remove=on_camera_removed,
-                            path=os.getenv("SMARTCATTLE_CAMERAS_FILE") or ".cameras.json")
+                            path=os.getenv("SMARTCATTLE_CAMERAS_FILE") or ".cameras.json",
+                            max_cameras=max_added_cameras(os.environ))
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
     # Listening on every interface is how other devices get here, so their browsers must be let in too,
     # and they must be told this PC's address: "localhost" would mean their own device.
