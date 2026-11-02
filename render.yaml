@@ -4,9 +4,21 @@ services:
     name: smartcattle-live
     runtime: docker
     # Free instances sleep after 15 min without visitors and have 0.1 CPU; the detector needs to stay awake.
-    plan: starter
+    # 2 GB and 1 CPU: the model alone took about 360 MB, and each camera adds its own frames and threads.
+    plan: standard
+    # A commit whose tests fail never reaches the running service.
+    autoDeployTrigger: checksPass
+    # Cameras added from the dashboard, which a restart would otherwise forget.
+    disk:
+      name: smartcattle-live-data
+      mountPath: /data
+      sizeGB: 1
     healthCheckPath: /health
     envVars:
+      - key: SMARTCATTLE_CAMERAS_FILE
+        value: /data/cameras.json
+      - key: SMARTCATTLE_MAX_CAMERAS
+        value: "3"
       - key: IMOU_APP_ID
         sync: false
       - key: IMOU_APP_SECRET
