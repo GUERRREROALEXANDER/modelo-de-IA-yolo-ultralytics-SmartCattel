@@ -149,11 +149,11 @@ def main(argv=None) -> int:
     def on_camera_removed(camera_id, source):
         if client is None:
             return
+        report_offline(camera_id)
         try:
             client.report_camera_source(camera_id, address_only(source), active=False)
         except BackendError as exc:
             print(f"Warning: could not record the removal of camera {camera_id}: {exc}", file=sys.stderr)
-        report_offline(camera_id)
 
     def report_offline(camera_id):
         # Lets the frontend drop the camera now instead of after the backend's offline timeout.
