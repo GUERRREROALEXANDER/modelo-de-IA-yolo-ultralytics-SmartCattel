@@ -569,7 +569,8 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
             if path == "/health":
                 self._json(200, {"status": "ok"})
             elif path == "/status":
-                self._json(200, view.snapshot())
+                # service_url lets the dashboard on this PC build a link a phone on the same wifi can open.
+                self._json(200, {**view.snapshot(), "service_url": state.public_url})
             elif path == "/snapshot.jpg":
                 jpeg = view.latest_jpeg()
                 if jpeg is None:
