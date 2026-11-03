@@ -50,8 +50,9 @@ def test_a_long_rest_stays_lying_and_getting_up_ends_it():
     monitor = PostureMonitor()
     run(monitor, [[300, 200, 560, 500]] * 10)
     run(monitor, [[300, 320, 560, 500]] * 10, start=5.0)
-    assert run(monitor, [[300, 320, 560, 500]] * 10, start=600.0) == LYING
-    assert run(monitor, [[300, 200, 560, 500]] * 10, start=700.0) == STANDING
+    # Seen all along, every half minute, for ten minutes: far longer than the samples remember.
+    assert run(monitor, [[300, 320, 560, 500]] * 20, start=10.0, step=30.0) == LYING
+    assert run(monitor, [[300, 200, 560, 500]] * 10, start=610.0) == STANDING
 
 
 def test_one_bad_frame_does_not_change_the_posture():
@@ -105,8 +106,6 @@ def test_the_posture_travels_to_the_backend_and_to_the_picture():
 
 
 def test_the_live_service_adds_the_posture_to_what_it_publishes():
-    from threading import Event
-
     import numpy as np
 
     from smartcattle_ai.live import LiveState, _process_frame
@@ -121,4 +120,3 @@ def test_the_live_service_adds_the_posture_to_what_it_publishes():
     frame = np.zeros((SIZE, SIZE, 3), dtype=np.uint8)
     _process_frame(frame, Flat(), state, None, 70, None, None, None, None, None, None, None)
     assert state.snapshot()["detections"][0]["posture"] == LYING
-    assert not Event().is_set()
