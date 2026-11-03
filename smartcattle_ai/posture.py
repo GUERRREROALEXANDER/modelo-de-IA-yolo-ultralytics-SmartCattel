@@ -13,6 +13,8 @@ LYING = "lying"
 
 #: The middle of the box moving this many body lengths per second is an animal walking, not a box jittering.
 WALKING_BODY_LENGTHS_PER_S = 0.15
+#: A box this much wider than tall is a body along the ground: a cow on its feet, seen from the side, stays below it.
+LYING_ASPECT = 2.0
 #: How long a sample stays in memory: enough to compare with how the animal looked a moment ago.
 WINDOW_S = 60.0
 #: Speed is measured over at least this long: from one frame to the next, jitter looks like movement.
@@ -49,8 +51,15 @@ class PostureMonitor:
         track.samples.append((now, bbox))
         while track.samples and now - track.samples[0][0] > WINDOW_S:
             track.samples.popleft()
-        track.state = WALKING if self._is_walking(track, bbox, now) else STANDING
+        if self._is_walking(track, bbox, now):
+            track.state = WALKING
+        else:
+            track.state = LYING if self._is_flat(bbox) else STANDING
         return track.state
+
+    @staticmethod
+    def _is_flat(bbox) -> bool:
+        return (bbox[2] - bbox[0]) >= LYING_ASPECT * max(bbox[3] - bbox[1], 1.0)
 
     @staticmethod
     def _is_walking(track: _Track, bbox, now: float) -> bool:
