@@ -21,6 +21,8 @@ HEIGHT_DROP = 0.72
 SAME_PLACE = 0.15
 #: Back to this share of the height it stood at, the animal has got up.
 HEIGHT_RECOVERED = 0.85
+#: A new posture must hold this long: one bad frame must not make an animal drop and rise on screen.
+SETTLE_S = 2.0
 #: How long a sample stays in memory: enough to compare with how the animal looked a moment ago.
 WINDOW_S = 60.0
 #: Speed is measured over at least this long: from one frame to the next, jitter looks like movement.
@@ -33,6 +35,8 @@ class _Track:
     state: str = STANDING
     # How tall it stood when it lay down: past WINDOW_S the samples no longer remember.
     standing_height: float | None = None
+    candidate: str | None = None
+    candidate_since: float = 0.0
 
 
 def _center(bbox) -> tuple[float, float]:
@@ -60,9 +64,21 @@ class PostureMonitor:
         while track.samples and now - track.samples[0][0] > WINDOW_S:
             track.samples.popleft()
         if self._is_walking(track, bbox, now):
-            track.state = WALKING
+            seen = WALKING
         else:
-            track.state = LYING if self._is_flat(bbox) or self._is_down(track, bbox) else STANDING
+            seen = LYING if self._is_flat(bbox) or self._is_down(track, bbox) else STANDING
+        if len(track.samples) == 1:
+            track.state = seen
+        return self._settled(track, seen, now)
+
+    @staticmethod
+    def _settled(track: _Track, seen: str, now: float) -> str:
+        if seen == track.state:
+            track.candidate = None
+        elif seen != track.candidate:
+            track.candidate, track.candidate_since = seen, now
+        elif now - track.candidate_since >= SETTLE_S:
+            track.state, track.candidate = seen, None
         return track.state
 
     def _is_down(self, track: _Track, bbox) -> bool:
