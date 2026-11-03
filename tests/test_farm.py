@@ -5,6 +5,8 @@ from urllib.error import HTTPError, URLError
 
 from pair_farm import main as pair_main
 from pair_farm import pair
+from smartcattle_ai.backend_client import BackendError
+from smartcattle_ai.env import load_env_file
 from smartcattle_ai.farm import FarmLink, is_farm_key, update_env_file
 
 
@@ -102,6 +104,25 @@ def test_no_internet_does_not_stop_the_loop(capsys):
 
     FarmLink(report, lambda: "https://a").tick()
     assert "could not reach" in capsys.readouterr().err
+
+
+def test_a_backend_that_fails_does_not_stop_the_loop(capsys):
+    def report(url):
+        raise BackendError("502")
+
+    FarmLink(report, lambda: "https://a").tick()
+    assert "could not reach" in capsys.readouterr().err
+
+
+def test_the_service_reads_back_what_linking_wrote(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    update_env_file(env, {"SMARTCATTLE_BACKEND_URL": "https://api.example", "SMARTCATTLE_API_KEY": "farm-1-x"})
+    monkeypatch.delenv("SMARTCATTLE_BACKEND_URL", raising=False)
+    monkeypatch.delenv("SMARTCATTLE_API_KEY", raising=False)
+    load_env_file(env)
+    import os
+    assert os.environ["SMARTCATTLE_BACKEND_URL"] == "https://api.example"
+    assert os.environ["SMARTCATTLE_API_KEY"] == "farm-1-x"
 
 
 def test_it_stops_when_asked():

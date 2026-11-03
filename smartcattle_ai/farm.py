@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from threading import Event, Thread
 
+from smartcattle_ai.backend_client import BackendError
+
 FARM_KEY_PREFIX = "farm-"
 REPORT_EVERY_S = 30.0
 
@@ -55,7 +57,7 @@ class FarmLink:
                 self._on_new_url(url)
         try:
             self._report(self._current_url())
-        except OSError as error:  # BackendError is one too.
+        except (BackendError, OSError) as error:
             print(f"Warning: could not reach the backend: {error}", file=sys.stderr)
 
     def run(self, stop: Event) -> None:
