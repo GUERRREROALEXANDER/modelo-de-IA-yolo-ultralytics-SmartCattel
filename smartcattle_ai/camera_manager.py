@@ -13,6 +13,7 @@ from threading import Event, Lock, Thread
 from typing import Any
 from urllib.parse import urlsplit
 
+from .pushed import PUSHED_SOURCE
 from .stream import host_and_port, is_device_index
 
 # Each camera costs CPU for detection, so an open-ended list would slow every camera down.
@@ -47,7 +48,7 @@ class ManagedCamera:
 
 def check_source(source: str) -> str:
     """A webcam index or a network stream. Anything else (file://, concat:...) would let FFmpeg read this PC."""
-    if is_device_index(source):
+    if is_device_index(source) or source == PUSHED_SOURCE:
         return source
     if urlsplit(source).scheme.lower() not in ALLOWED_SCHEMES:
         raise ValueError("The camera address must be rtsp://, http://, an IP address or a webcam number")
