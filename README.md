@@ -454,6 +454,18 @@ The saved password of `CAMERA_HOST` is used only for that host; any other addres
 
 On Render the disk is erased on each deploy, so `.cameras.json` does not survive one: added cameras must be added again unless the service has a persistent disk (`SMARTCATTLE_CAMERAS_FILE=/var/data/cameras.json`).
 
+### Installing it at a farm
+
+The system works with the cameras of whoever installs it, on their own network:
+
+1. Copy the three repositories to the farm's PC, without this PC's `.env` or `.cameras.json`: those hold another site's camera.
+2. Fill in `.env` from `.env.example`. No camera setting is needed.
+3. Run `scripts\start_local.ps1`. It opens the Cameras page.
+4. Create an account: it starts empty, and it is theirs.
+5. On the Cameras page, search the network or scan the QR with a phone, save the camera and press Connect.
+
+The PC must be on the same network as the cameras, because the AI service is what opens them.
+
 ### Opening the dashboard from another device
 
 Same Wi-Fi: run the three services on every interface, and open `http://<this PC's IP>:5173`.
