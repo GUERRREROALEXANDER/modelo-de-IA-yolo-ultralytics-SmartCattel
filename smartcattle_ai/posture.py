@@ -19,6 +19,8 @@ LYING_ASPECT = 2.0
 HEIGHT_DROP = 0.72
 #: Feet this close, as a share of the box height, mean the animal has not changed its distance to the camera.
 SAME_PLACE = 0.15
+#: Back to this share of the height it stood at, the animal has got up.
+HEIGHT_RECOVERED = 0.85
 #: How long a sample stays in memory: enough to compare with how the animal looked a moment ago.
 WINDOW_S = 60.0
 #: Speed is measured over at least this long: from one frame to the next, jitter looks like movement.
@@ -29,6 +31,8 @@ SPEED_OVER_S = 1.0
 class _Track:
     samples: deque = field(default_factory=deque)
     state: str = STANDING
+    # How tall it stood when it lay down: past WINDOW_S the samples no longer remember.
+    standing_height: float | None = None
 
 
 def _center(bbox) -> tuple[float, float]:
@@ -58,17 +62,27 @@ class PostureMonitor:
         if self._is_walking(track, bbox, now):
             track.state = WALKING
         else:
-            track.state = LYING if self._is_flat(bbox) or self._has_dropped(track, bbox) else STANDING
+            track.state = LYING if self._is_flat(bbox) or self._is_down(track, bbox) else STANDING
         return track.state
 
-    @staticmethod
-    def _has_dropped(track: _Track, bbox) -> bool:
-        """Lower than it just was, in the same spot. A cow walking away also shrinks, but its feet move up the picture."""
+    def _is_down(self, track: _Track, bbox) -> bool:
         height = bbox[3] - bbox[1]
-        tallest = max(
+        if track.standing_height is not None and height < HEIGHT_RECOVERED * track.standing_height:
+            return True
+        track.standing_height = None
+        tallest = self._tallest_here(track, bbox)
+        if height <= HEIGHT_DROP * tallest:
+            track.standing_height = tallest
+            return True
+        return False
+
+    @staticmethod
+    def _tallest_here(track: _Track, bbox) -> float:
+        """Its recent height in this spot. A cow walking away also shrinks, but its feet move up the picture."""
+        height = bbox[3] - bbox[1]
+        return max(
             (old[3] - old[1] for _, old in track.samples if abs(old[3] - bbox[3]) <= SAME_PLACE * height), default=height,
         )
-        return height <= HEIGHT_DROP * tallest
 
     @staticmethod
     def _is_flat(bbox) -> bool:
