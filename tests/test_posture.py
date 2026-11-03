@@ -44,3 +44,11 @@ def test_a_cow_far_away_is_not_lying_because_it_looks_small():
     monitor = PostureMonitor()
     run(monitor, [[300, 200, 560, 500]] * 4)
     assert run(monitor, [[400, 100, 500, 200]] * 10, start=60.0) == STANDING
+
+
+def test_a_long_rest_stays_lying_and_getting_up_ends_it():
+    monitor = PostureMonitor()
+    run(monitor, [[300, 200, 560, 500]] * 10)
+    run(monitor, [[300, 320, 560, 500]] * 10, start=5.0)
+    assert run(monitor, [[300, 320, 560, 500]] * 10, start=600.0) == LYING
+    assert run(monitor, [[300, 200, 560, 500]] * 10, start=700.0) == STANDING
