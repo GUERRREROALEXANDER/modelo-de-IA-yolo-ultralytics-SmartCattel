@@ -25,6 +25,8 @@ HEIGHT_RECOVERED = 0.85
 SETTLE_S = 2.0
 #: A box this close to the edge of the picture is a cut-off animal, so its shape says nothing.
 EDGE_MARGIN = 0.01
+#: A track unseen for this long is gone.
+FORGET_AFTER_S = 300.0
 #: How long a sample stays in memory: enough to compare with how the animal looked a moment ago.
 WINDOW_S = 60.0
 #: Speed is measured over at least this long: from one frame to the next, jitter looks like movement.
@@ -51,6 +53,7 @@ class PostureMonitor:
 
     def update(self, detections: list[dict], width: int, height: int, now: float) -> list[dict]:
         """The same detections, with "posture" on the cows it can say something about."""
+        self._forget_gone(now)
         result = []
         for item in detections:
             if item["class"] != "cow" or "posture" in item:
@@ -66,6 +69,12 @@ class PostureMonitor:
                 continue
             result.append({**item, "posture": self._estimate(item, now)})
         return result
+
+    def _forget_gone(self, now: float) -> None:
+        """A service left running for months must not keep every animal it ever numbered."""
+        gone = [key for key, track in self._tracks.items() if now - track.samples[-1][0] > FORGET_AFTER_S]
+        for key in gone:
+            del self._tracks[key]
 
     @staticmethod
     def _is_cut_off(bbox, width: int, height: int) -> bool:
