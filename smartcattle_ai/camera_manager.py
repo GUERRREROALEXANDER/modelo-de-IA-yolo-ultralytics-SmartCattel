@@ -117,6 +117,10 @@ class CameraManager:
         with self._lock:
             return self._cameras.get(camera_id)
 
+    def all(self) -> list[ManagedCamera]:
+        with self._lock:
+            return list(self._cameras.values())
+
     def any_stalled(self) -> bool:
         with self._lock:
             return any(camera.state.stalled() for camera in self._cameras.values())

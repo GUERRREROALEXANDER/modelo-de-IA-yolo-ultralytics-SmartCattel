@@ -50,6 +50,9 @@ class QuickTunnel:
         Thread(target=stderr.read, daemon=True).start()
         return self.url
 
+    def alive(self) -> bool:
+        return self._process is not None and self._process.poll() is None
+
     def stop(self) -> None:
         if self._process is not None and self._process.poll() is None:
             self._process.terminate()
