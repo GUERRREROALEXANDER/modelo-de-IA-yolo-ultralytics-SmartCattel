@@ -15,6 +15,10 @@ LYING = "lying"
 WALKING_BODY_LENGTHS_PER_S = 0.15
 #: A box this much wider than tall is a body along the ground: a cow on its feet, seen from the side, stays below it.
 LYING_ASPECT = 2.0
+#: The box falling to this share of its recent height, with the feet in the same place, is the animal lying down.
+HEIGHT_DROP = 0.72
+#: Feet this close, as a share of the box height, mean the animal has not changed its distance to the camera.
+SAME_PLACE = 0.15
 #: How long a sample stays in memory: enough to compare with how the animal looked a moment ago.
 WINDOW_S = 60.0
 #: Speed is measured over at least this long: from one frame to the next, jitter looks like movement.
@@ -54,8 +58,17 @@ class PostureMonitor:
         if self._is_walking(track, bbox, now):
             track.state = WALKING
         else:
-            track.state = LYING if self._is_flat(bbox) else STANDING
+            track.state = LYING if self._is_flat(bbox) or self._has_dropped(track, bbox) else STANDING
         return track.state
+
+    @staticmethod
+    def _has_dropped(track: _Track, bbox) -> bool:
+        """Lower than it just was, in the same spot. A cow walking away also shrinks, but its feet move up the picture."""
+        height = bbox[3] - bbox[1]
+        tallest = max(
+            (old[3] - old[1] for _, old in track.samples if abs(old[3] - bbox[3]) <= SAME_PLACE * height), default=height,
+        )
+        return height <= HEIGHT_DROP * tallest
 
     @staticmethod
     def _is_flat(bbox) -> bool:
