@@ -59,3 +59,10 @@ def test_one_bad_frame_does_not_change_the_posture():
     run(monitor, [[300, 200, 560, 500]] * 10)
     assert run(monitor, [[300, 320, 560, 500]], start=5.0) == STANDING
     assert run(monitor, [[300, 200, 560, 500]] * 3, start=5.5) == STANDING
+
+
+def test_a_cut_off_cow_says_nothing_new():
+    monitor = PostureMonitor()
+    assert "posture" not in monitor.update([cow([0, 300, 300, 400])], SIZE, SIZE, 0.0)[0]
+    run(monitor, [[300, 200, 560, 500]] * 3)
+    assert monitor.update([cow([0, 300, 300, 400])], SIZE, SIZE, 2.0)[0]["posture"] == STANDING
