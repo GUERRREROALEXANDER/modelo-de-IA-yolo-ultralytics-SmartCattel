@@ -61,6 +61,8 @@ class LiveState:
         self.zone = as_zone_set(zone)
         # Optional gate line counter (--gate-line); only the detection thread updates it.
         self.gate = None
+        # Optional posture estimate; only the detection thread uses it.
+        self.posture = None
         # Optional heat map; the detection thread adds to it, /heatmap.jpg reads a copy of its grid.
         self.heat = None
         # Base URL where browsers reach this server (e.g. a tunnel); reported to the backend while online.
@@ -215,6 +217,8 @@ def _process_frame(frame, detector, state, publisher, jpeg_quality, tracker, sti
     if tracker is not None:
         detections = tracker.update(detections)
     detections = classify_zone(detections, width, height, zone)
+    if state.posture is not None:
+        detections = state.posture.update(detections, width, height, time.time())
     if stillness is not None:
         detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
     if night is not None:
