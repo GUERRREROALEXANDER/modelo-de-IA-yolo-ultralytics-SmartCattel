@@ -81,3 +81,10 @@ def test_people_and_a_trained_models_answer_are_left_alone():
     person = {"class": "person", "confidence": 0.9, "bbox": [300, 400, 600, 500], "track_id": 2}
     trained = {**cow([300, 200, 500, 500]), "posture": LYING}
     assert monitor.update([person, trained], SIZE, SIZE, 0.0) == [person, trained]
+
+
+def test_animals_gone_from_view_are_forgotten():
+    monitor = PostureMonitor()
+    run(monitor, [[300, 200, 560, 500]] * 3)
+    monitor.update([], SIZE, SIZE, 10_000.0)
+    assert monitor._tracks == {}
