@@ -32,3 +32,15 @@ def test_a_jittering_box_is_not_walking():
 def test_a_calf_only_ever_seen_lying_is_lying():
     # Nothing to compare it with: a calf that never stood up in view must still read as lying.
     assert run(PostureMonitor(), [[300, 400, 600, 500]] * 10) == LYING
+
+
+def test_a_cow_that_lies_down_where_it_stood():
+    monitor = PostureMonitor()
+    run(monitor, [[300, 200, 560, 500]] * 10)
+    assert run(monitor, [[300, 320, 560, 500]] * 10, start=5.0) == LYING
+
+
+def test_a_cow_far_away_is_not_lying_because_it_looks_small():
+    monitor = PostureMonitor()
+    run(monitor, [[300, 200, 560, 500]] * 4)
+    assert run(monitor, [[400, 100, 500, 200]] * 10, start=60.0) == STANDING
