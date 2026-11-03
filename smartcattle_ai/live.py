@@ -17,7 +17,7 @@ import numpy as np
 from .backend_client import BackendError, occupancy_report
 from .camera_manager import CameraLimitError, check_reachable_from_cloud, check_source
 from .media import draw_detections
-from .discovery import local_ipv4, scan_cameras
+from .discovery import local_ipv4, no_answer, scan_cameras
 from .limits import RateLimit, SessionCache, StreamSlots, client_address
 from .rules import evaluate
 from .stream import camera_url_from_env, normalize_source, redact_url
@@ -637,6 +637,10 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                     self._json(422, {"detail": "camera_id must be 1 to 64 letters, digits, '-' or '_'"})
                     return
                 if public and not self._owns_camera(camera_id):
+                    return
+                problem = no_answer(source)
+                if problem:
+                    self._json(422, {"detail": problem})
                     return
                 try:
                     entry = manager.add(source, camera_id)
