@@ -24,6 +24,19 @@ def session_is_valid(base_url: str, authorization: str, timeout: float = 5.0) ->
         return False
 
 
+def session_on_this_farm(base_url: str, authorization: str, farm_key: str, timeout: float = 5.0) -> bool:
+    """Whether this Authorization header belongs to someone in the account this PC is linked to."""
+    if not authorization.startswith("Bearer "):
+        return False
+    request = Request(f"{base_url.rstrip('/')}/api/ai/farm-pc/access",
+                      headers={"Authorization": authorization, "X-API-Key": farm_key})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return response.status == 204
+    except (HTTPError, URLError, OSError):
+        return False
+
+
 def camera_is_owned(base_url: str, authorization: str, camera_id: str, timeout: float = 5.0) -> bool:
     """Asks the backend whether this person's account has this camera saved. It answers 404 for anyone else's."""
     if not authorization.startswith("Bearer "):
@@ -78,6 +91,10 @@ class BackendClient:
     def report_camera_status(self, camera_id: str, report: dict) -> dict:
         _, response = self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/status", report, "PUT")
         return response
+
+    def report_farm_pc(self, url: str) -> None:
+        """Where browsers reach this PC now. Only a PC linked to an account has somewhere to report it."""
+        self._request("/api/ai/farm-pc", {"url": url}, "PUT")
 
     def report_camera_source(self, camera_id: str, source: str, active: bool = True) -> None:
         """Where the camera is reached, for the database. Callers pass it without credentials."""
