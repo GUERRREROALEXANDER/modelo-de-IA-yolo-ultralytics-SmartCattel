@@ -1,4 +1,5 @@
-# Render Blueprint: live.py as a Docker web service reading the camera through the Imou cloud.
+# Render Blueprint: live.py as a Docker web service for every account: phones and webcams send it their pictures,
+# and it can open cameras with a public address.
 services:
   - type: web
     name: smartcattle-live
@@ -8,39 +9,18 @@ services:
     plan: standard
     # A commit whose tests fail never reaches the running service.
     autoDeployTrigger: checksPass
-    # Cameras added from the dashboard, which a restart would otherwise forget.
-    disk:
-      name: smartcattle-live-data
-      mountPath: /data
-      sizeGB: 1
     healthCheckPath: /health
     envVars:
-      # This service watches one fixed camera in the Imou cloud, so it opens it at start.
-      - key: SMARTCATTLE_AUTOSTART_CAMERA
-        value: "1"
-      - key: SMARTCATTLE_CAMERAS_FILE
-        value: /data/cameras.json
+      # Shared by everyone's cameras. They take turns in the detector, so more of them only lowers the frame rate.
       - key: SMARTCATTLE_MAX_CAMERAS
-        value: "3"
-      - key: IMOU_APP_ID
-        sync: false
-      - key: IMOU_APP_SECRET
-        sync: false
-      - key: IMOU_DEVICE_ID
-        sync: false
-      - key: IMOU_API_URL
-        value: https://openapi.easy4ip.com/openapi
-      - key: IMOU_PROFILE
-        value: SD
-      - key: CAMERA_ID
-        value: camera-01
+        value: "8"
       - key: SMARTCATTLE_BACKEND_URL
-        sync: false
+        value: https://smartcattle-backend.onrender.com
       - key: SMARTCATTLE_API_KEY
         sync: false
       - key: SMARTCATTLE_LIVE_ORIGINS
         value: https://smartcattle-frontend.onrender.com
-      # This server is not on a farm's network: refuse private addresses and webcam numbers with a clear message.
+      # Not on any farm's network: private addresses and webcam numbers get a clear message.
       - key: SMARTCATTLE_CLOUD
         value: "1"
       # Smaller input keeps CPU inference near real time on a shared instance.
