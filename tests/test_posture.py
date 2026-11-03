@@ -27,3 +27,8 @@ def test_a_cow_whose_box_crosses_the_picture_is_walking():
 def test_a_jittering_box_is_not_walking():
     boxes = [[300 + (i % 2) * 3, 300, 500 + (i % 2) * 3, 500] for i in range(20)]
     assert run(PostureMonitor(), boxes) == STANDING
+
+
+def test_a_calf_only_ever_seen_lying_is_lying():
+    # Nothing to compare it with: a calf that never stood up in view must still read as lying.
+    assert run(PostureMonitor(), [[300, 400, 600, 500]] * 10) == LYING
