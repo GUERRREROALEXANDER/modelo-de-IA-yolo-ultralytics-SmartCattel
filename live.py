@@ -21,6 +21,7 @@ from smartcattle_ai.heatmap import HeatMap
 from smartcattle_ai.line_counter import LineCounter, parse_line
 from smartcattle_ai.night_watch import NightWatch, parse_window
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
+from smartcattle_ai.posture import PostureMonitor
 from smartcattle_ai.stream import CameraStream, address_only, camera_url_from_env, normalize_source, redact_url
 from smartcattle_ai.stillness import StillnessMonitor
 from smartcattle_ai.tracking import IoUTracker
@@ -121,6 +122,7 @@ def main(argv=None) -> int:
         """One camera's state and threads, not started yet."""
         camera_state = LiveState(camera_id, zone, public_url)
         camera_state.gate = gate
+        camera_state.posture = PostureMonitor()
         if not args.no_heatmap:
             camera_state.heat = HeatMap()
         frames = LatestFrame()
