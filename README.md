@@ -478,6 +478,29 @@ npm run dev -- --host 0.0.0.0 --port 5173              # frontend
 
 Anyone on that network can then watch `/video.mjpg`, because the video has no login. From another network, use the hosted frontend with `--tunnel`.
 
+### What each cow is doing
+
+Every camera estimates whether each cow is `walking`, `standing` or `lying`, and sends it with its box to the dashboard, where the 3D view shows it. The detector only knows "cow", so this reads the box over time (`smartcattle_ai/posture.py`):
+
+- **Walking:** the middle of the box moves at least 0.15 body lengths per second.
+- **Lying:** the box is at least twice as wide as tall, or falls to 72 % of its recent height with the feet in the same place.
+- **Standing:** neither of those. A change must hold for two seconds.
+
+It is an estimate, tested on boxes built for the tests and not yet measured on footage of real animals. A cow facing the camera while lying can read as standing, because its box is not wide, and a calf that lies down before entering the picture has only its shape to go on.
+
+### Training on real standing and lying cattle
+
+Better accuracy takes pictures of the herd labelled by a person. A model whose classes are `cow_standing` and `cow_lying` replaces the estimate with no code change:
+
+```powershell
+python scripts/collect_posture_frames.py --source 1 --every 5     # sorts pictures by estimated posture
+# Check every picture, label the boxes in YOLO format, and write datasets/cattle_posture/data.yaml
+python scripts/validate_dataset.py --data datasets/cattle_posture/data.yaml --allowed-classes 0,1
+python scripts/train.py --config configs/train_cattle_posture.yaml --weights-out models/cattle_posture_best.pt
+```
+
+Then set `SMARTCATTLE_WEIGHTS=models/cattle_posture_best.pt`. No such model has been trained yet: it needs those pictures.
+
 ### Cloud deployment (Imou Open Platform)
 
 With `IMOU_APP_ID`, `IMOU_APP_SECRET` and `IMOU_DEVICE_ID` set, `live.py` skips RTSP and asks the Imou cloud for the camera's HLS live URL (`bindDeviceLive` the first time, then `getLiveStreamInfo` on every reconnect), so it can run anywhere with internet access. The camera must be added to the Imou developer account that owns the app (open.imoulife.com). HLS adds a few seconds of delay compared with RTSP.
