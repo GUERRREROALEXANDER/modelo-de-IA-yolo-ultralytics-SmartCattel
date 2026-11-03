@@ -360,7 +360,7 @@ The first command runs the whole suite (256 tests), **including** tests marked `
 
 ## Live camera
 
-`live.py` reads the IMOU camera over RTSP (credentials from `.env`, see `.env.example`), runs the detector on the newest frame only (about 10 FPS on CPU), and serves on `http://localhost:8090`:
+`live.py` starts with no camera and loads no model until someone connects a camera from the Cameras page of the dashboard. `--url` opens one at start, and `--auto-camera` opens the one in `.env` and reconnects the saved list. For each camera it runs the detector on the newest frame only (about 10 FPS on CPU), and serves on `http://localhost:8090`:
 
 | Path | Content |
 | --- | --- |
@@ -395,7 +395,8 @@ A backend that is down does not stop the video. `/status` also returns `zones` (
 
 ```powershell
 python probe_camera.py --duration 10 --reconnect-test   # check the stream first
-python live.py                                          # camera + YOLO + video server
+python live.py                                          # waits for a camera from the dashboard
+python live.py --url 1                                  # opens webcam 1 right away
 powershell -ExecutionPolicy Bypass -File scripts\start_local.ps1   # backend, live.py and frontend together
 ```
 
