@@ -88,3 +88,17 @@ def test_animals_gone_from_view_are_forgotten():
     run(monitor, [[300, 200, 560, 500]] * 3)
     monitor.update([], SIZE, SIZE, 10_000.0)
     assert monitor._tracks == {}
+
+
+def test_the_posture_travels_to_the_backend_and_to_the_picture():
+    import numpy as np
+
+    from smartcattle_ai.backend_client import backend_detections
+    from smartcattle_ai.media import draw_detections
+
+    lying = {**cow([300, 400, 600, 500]), "inside_zone": True, "posture": LYING}
+    plain = {**cow([300, 200, 500, 500]), "inside_zone": True}
+    reported = backend_detections([lying, plain], SIZE, SIZE)
+    assert reported[0]["posture"] == LYING and "posture" not in reported[1]
+    frame = np.zeros((SIZE, SIZE, 3), dtype=np.uint8)
+    assert (draw_detections(frame, [lying]) != draw_detections(frame, [{**lying, "posture": STANDING}])).any()
