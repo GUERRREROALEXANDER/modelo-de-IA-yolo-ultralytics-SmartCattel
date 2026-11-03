@@ -1,3 +1,5 @@
+from urllib.error import HTTPError
+import io
 """Backend integration tests using a local HTTP server only."""
 
 import json
@@ -40,13 +42,15 @@ def backend():
                 self.respond(404, {"detail": "Not found"})
 
         def do_POST(self):
+            # As a real server does: on Windows, closing with the body unread cuts the connection.
+            sent = self.rfile.read(int(self.headers["Content-Length"]))
             if self.path != "/api/ai/events":
                 self.respond(404, {"detail": "Not found"})
                 return
             if self.headers.get("X-API-Key") != "test-key":
                 self.respond(401, {"detail": "Invalid or missing API key"})
                 return
-            event = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            event = json.loads(sent)
             if set(event) != {"event_type", "camera_id", "detected_object", "confidence", "timestamp"}:
                 self.respond(422, {"detail": "Extra or missing fields"})
                 return
@@ -86,6 +90,20 @@ def test_mapping_and_authenticated_request(backend):
     assert client.health()
     assert client.send_event(payload)["id"] == "1"
     assert events == [payload]
+
+
+def test_a_connection_cut_during_an_error_answer_is_still_a_backend_error(monkeypatch):
+    class Cut(io.BytesIO):
+        def read(self, *args):
+            raise ConnectionAbortedError("cut")
+
+    def refuse(request, timeout):
+        raise HTTPError(request.full_url, 502, "Bad Gateway", None, Cut())
+
+    monkeypatch.setattr("smartcattle_ai.backend_client.urlopen", refuse)
+    with pytest.raises(BackendError, match="Bad Gateway") as error:
+        BackendClient("http://backend.example").health()
+    assert error.value.status == 502
 
 
 def test_http_errors_include_status_and_detail(backend):

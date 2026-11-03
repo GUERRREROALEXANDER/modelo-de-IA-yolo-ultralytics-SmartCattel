@@ -70,7 +70,7 @@ class BackendClient:
         except HTTPError as exc:
             try:
                 detail = json.load(exc).get("detail")
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, OSError):  # OSError: the connection dropped during the answer.
                 detail = None
             raise BackendError(f"Backend HTTP {exc.code}: {detail or exc.reason}", exc.code) from exc
         except (URLError, OSError) as exc:
