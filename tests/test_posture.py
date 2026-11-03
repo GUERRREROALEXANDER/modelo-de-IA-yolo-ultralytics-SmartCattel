@@ -102,3 +102,23 @@ def test_the_posture_travels_to_the_backend_and_to_the_picture():
     assert reported[0]["posture"] == LYING and "posture" not in reported[1]
     frame = np.zeros((SIZE, SIZE, 3), dtype=np.uint8)
     assert (draw_detections(frame, [lying]) != draw_detections(frame, [{**lying, "posture": STANDING}])).any()
+
+
+def test_the_live_service_adds_the_posture_to_what_it_publishes():
+    from threading import Event
+
+    import numpy as np
+
+    from smartcattle_ai.live import LiveState, _process_frame
+    from smartcattle_ai.zones import ZoneSet
+
+    class Flat:
+        def detect(self, frame):
+            return [{"class": "cow", "confidence": 0.9, "bbox": [100, 300, 400, 400]}]
+
+    state = LiveState("camera-01", ZoneSet.from_rectangle((0.0, 0.0, 1.0, 1.0)))
+    state.posture = PostureMonitor()
+    frame = np.zeros((SIZE, SIZE, 3), dtype=np.uint8)
+    _process_frame(frame, Flat(), state, None, 70, None, None, None, None, None, None, None)
+    assert state.snapshot()["detections"][0]["posture"] == LYING
+    assert not Event().is_set()
