@@ -53,8 +53,12 @@ class PostureMonitor:
         """The same detections, with "posture" on the cows it can say something about."""
         result = []
         for item in detections:
-            if item["class"] != "cow" or item.get("track_id") is None:
-                result.append(item)
+            if item["class"] != "cow" or "posture" in item:
+                result.append(item)  # A model trained on postures has already said.
+                continue
+            if item.get("track_id") is None:
+                # Tracking is off, so there is no history: only the shape can say anything.
+                result.append({**item, "posture": LYING} if self._is_flat(item["bbox"]) else item)
                 continue
             if self._is_cut_off(item["bbox"], width, height):
                 known = self._tracks.get(item["track_id"])
