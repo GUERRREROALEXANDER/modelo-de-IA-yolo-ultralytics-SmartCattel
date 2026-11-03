@@ -135,8 +135,11 @@ def backend_detections(detections: list[dict], width: int, height: int, limit: i
         box = normalized_box(item["bbox"], width, height)
         if box is None:
             continue
-        result.append({"track_id": item.get("track_id"), "label": "cow", "confidence": item["confidence"],
-                       "bbox": box, "inside_zone": bool(item["inside_zone"])})
+        report = {"track_id": item.get("track_id"), "label": "cow", "confidence": item["confidence"],
+                  "bbox": box, "inside_zone": bool(item["inside_zone"])}
+        if item.get("posture"):
+            report["posture"] = item["posture"]
+        result.append(report)
         if len(result) == limit:
             break
     return result
