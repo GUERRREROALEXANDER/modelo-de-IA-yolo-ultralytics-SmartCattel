@@ -19,6 +19,7 @@ from .camera_manager import CameraLimitError, check_reachable_from_cloud, check_
 from .media import draw_detections
 from .discovery import local_ipv4, no_answer, scan_cameras
 from .limits import RateLimit, SessionCache, StreamSlots, client_address
+from .pushed import PUSHED_SOURCE
 from .rules import evaluate
 from .stream import camera_url_from_env, normalize_source, redact_url
 from .zones import ZoneSet, as_zone_set
@@ -395,6 +396,10 @@ def zone_sync_worker(client, state: LiveState, fallback: ZoneSet, stop: Event, i
 
 
 MAX_CAMERA_BODY = 4096
+# A phone's picture. It is decoded in memory, so it stays well under what one worth analysing weighs at most.
+MAX_FRAME_BODY = 2 * 1024 * 1024
+# A few a second, per address, which is more than the detector can use.
+MAX_FRAMES_PER_MINUTE = 900
 # Everything a dashboard does in a minute fits well under these: a preview per camera each second and /status polling.
 MAX_REQUESTS_PER_MINUTE = 1200
 # Each of these makes this service call the backend, or changes what it runs.
@@ -409,6 +414,7 @@ _CAMERA_HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
 _CAMERA_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _ADDED_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})(/[a-z.]+)")
 _REMOVE_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})")
+_FRAME_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})/frame")
 
 
 def camera_source_from_request(body: dict, defaults=None) -> str:
@@ -453,6 +459,9 @@ def new_camera_source(body: dict, defaults=None) -> str:
     Saved credentials apply only to the host they were saved for: an address typed into the dashboard must
     never receive another camera's password.
     """
+    if body.get("browser") is True:
+        # It sends its own pictures, so being in the cloud is no obstacle and there is no address to check.
+        return PUSHED_SOURCE
     defaults = os.environ if defaults is None else defaults
     host = body.get("host")
     if isinstance(host, str) and host.strip():
@@ -482,6 +491,7 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
     ownership = SessionCache(owns) if public else None
     requests = RateLimit(MAX_REQUESTS_PER_MINUTE)
     dashboard_calls = RateLimit(MAX_DASHBOARD_CALLS_PER_MINUTE)
+    pushed_frames = RateLimit(MAX_FRAMES_PER_MINUTE)
     streams = StreamSlots(MAX_STREAMS, MAX_STREAMS_PER_ADDRESS)
 
     class Handler(BaseHTTPRequestHandler):
@@ -593,7 +603,11 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
             elif path == "/cameras/scan":
                 # The scan reveals what is on the LAN, so like POST /camera it answers the dashboard only.
                 if self._dashboard_only():
-                    self._json(200, scan_cameras())
+                    # In the cloud this would look around the server's own network, which is nobody's farm.
+                    if os.getenv("SMARTCATTLE_CLOUD") == "1":
+                        self._json(409, {"detail": "This service runs in the cloud and has no local network to search"})
+                    else:
+                        self._json(200, scan_cameras())
             else:
                 self._json(404, {"detail": "Not found"})
 
@@ -614,7 +628,13 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = -1
-            sent = self.rfile.read(length) if 0 < length <= MAX_CAMERA_BODY else b""
+            pushed = _FRAME_PATH.fullmatch(route)
+            sent = self.rfile.read(length) if 0 < length <= (MAX_FRAME_BODY if pushed else MAX_CAMERA_BODY) else b""
+            if pushed:
+                if length > MAX_FRAME_BODY:
+                    self.rfile.read(min(length, 4 * MAX_FRAME_BODY))
+                self._take_frame(pushed.group(1), sent)
+                return
             if route not in ("/camera", "/cameras"):
                 self._json(404, {"detail": "Not found"})
                 return
@@ -659,6 +679,28 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
             state.set_camera_status("connecting")
             # Never echo the URL back: it holds the camera credentials.
             self._json(202, {"status": "connecting", "camera": redact_url(source)})
+
+        def _take_frame(self, camera_id: str, jpeg: bytes) -> None:
+            """A picture from a phone. Not one of the dashboard's calls: it comes several times a second."""
+            if self.headers.get("Origin", "").rstrip("/") not in origins:
+                self._json(403, {"detail": "Origin not allowed"})
+                return
+            if self._refused_by(pushed_frames) or (public and not self._owns_camera(camera_id)):
+                return
+            entry = manager.get(camera_id) if manager is not None else None
+            push = getattr(entry.stream, "push", None) if entry is not None else None
+            if push is None:
+                self._json(404, {"detail": "This camera is not connected"})
+                return
+            try:
+                push(jpeg)
+            except ValueError as error:
+                self._json(422, {"detail": str(error)})
+                return
+            self.send_response(204)
+            self._cors()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def do_DELETE(self):
             added = _REMOVE_CAMERA_PATH.fullmatch(self.path.split("?", 1)[0])

@@ -17,6 +17,7 @@ from smartcattle_ai.backend_client import (
     session_on_this_farm,
 )
 from smartcattle_ai.farm import FarmLink, is_farm_key
+from smartcattle_ai.pushed import PUSHED_SOURCE, PushedStream
 from smartcattle_ai.camera_manager import MAX_CAMERAS, CameraManager, ManagedCamera, SharedDetector, is_public_url
 from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
@@ -136,7 +137,8 @@ def main(argv=None) -> int:
         frames = LatestFrame()
         # Short backoff so a camera that comes back is picked up within seconds. Not for the Imou cloud (a callable
         # source): every retry spends calls of its monthly allowance, and a day offline must not use it all up.
-        stream = CameraStream(source, max_backoff_s=5 if isinstance(source, str) else 300)
+        stream = PushedStream() if source == PUSHED_SOURCE \
+            else CameraStream(source, max_backoff_s=5 if isinstance(source, str) else 300)
 
         def on_camera_state(status, error):
             camera_state.set_camera_status(status, error)
