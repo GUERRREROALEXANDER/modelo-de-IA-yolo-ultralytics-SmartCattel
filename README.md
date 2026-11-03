@@ -456,6 +456,18 @@ The saved password of `CAMERA_HOST` is used only for that host; any other addres
 
 On Render the disk is erased on each deploy, so `.cameras.json` does not survive one: added cameras must be added again unless the service has a persistent disk (`SMARTCATTLE_CAMERAS_FILE=/var/data/cameras.json`).
 
+### Using it from anywhere
+
+The dashboard and the backend live on the internet, and each farm has one PC running this service, because only something on the farm's network can open its cameras. The PC opens a tunnel outwards, so no router needs configuring and no one needs to be on the farm's wifi to watch.
+
+1. On the farm's PC, unzip this repository and double click `Iniciar SmartCattle.bat`. It installs what is missing; the first time takes several minutes.
+2. Sign in on the dashboard, open **Cameras** and press **Mostrar código**. Type the code into the PC's window. This happens once.
+3. From then on the Cameras page searches and connects through that PC, wherever you open it from. The PC restarts the service if it stops, starts with Windows, and brings the tunnel back if it drops, reporting the new address to the backend.
+
+Each PC gets its own key, valid only for the cameras of its account. If the PC is off or has no internet, the page says so.
+
+The quick tunnel is free and needs no account, but Cloudflare gives no uptime guarantee for it, so it fits a few people rather than a commercial service.
+
 ### Installing it at a farm
 
 The system works with the cameras of whoever installs it, on their own network:
