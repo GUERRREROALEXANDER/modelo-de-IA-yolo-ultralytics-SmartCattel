@@ -22,6 +22,13 @@ ENV = {"CAMERA_HOST": "192.168.1.30", "CAMERA_USERNAME": "owner", "CAMERA_PASSWO
        "CAMERA_RTSP_PORT": "554", "CAMERA_RTSP_PATH": "/live"}
 
 
+@pytest.fixture(autouse=True)
+def every_address_answers(monkeypatch):
+    """These tests use made-up addresses: nothing is really there to answer."""
+    monkeypatch.setattr("smartcattle_ai.live.no_answer", lambda source: None)
+
+
+
 class FakeStream:
     def __init__(self):
         self.switched, self.stopped = [], False
