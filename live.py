@@ -8,7 +8,15 @@ from datetime import datetime, timezone
 from threading import Event, Thread
 
 from smartcattle_ai import Detector, Settings
-from smartcattle_ai.backend_client import BackendClient, BackendError, EventThrottle, camera_is_owned, session_is_valid
+from smartcattle_ai.backend_client import (
+    BackendClient,
+    BackendError,
+    EventThrottle,
+    camera_is_owned,
+    session_is_valid,
+    session_on_this_farm,
+)
+from smartcattle_ai.farm import FarmLink, is_farm_key
 from smartcattle_ai.camera_manager import MAX_CAMERAS, CameraManager, ManagedCamera, SharedDetector, is_public_url
 from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
@@ -213,8 +221,14 @@ def main(argv=None) -> int:
     session_check = camera_check = None
     if args.tunnel or is_public_url(args.public_url):
         # Reachable from the internet: changing cameras takes a dashboard session. No backend to ask means no one can.
-        session_check = (lambda authorization: session_is_valid(args.backend_url, authorization)) if args.backend_url \
-            else (lambda authorization: False)
+        farm_key = os.getenv("SMARTCATTLE_API_KEY")
+        if args.backend_url and is_farm_key(farm_key):
+            # Being signed in is not enough here: this PC's network is only for the people of its account.
+            session_check = lambda authorization: session_on_this_farm(args.backend_url, authorization, farm_key)
+        elif args.backend_url:
+            session_check = lambda authorization: session_is_valid(args.backend_url, authorization)
+        else:
+            session_check = lambda authorization: False
         if args.backend_url:
             camera_check = lambda authorization, camera_id: camera_is_owned(args.backend_url, authorization, camera_id)
     try:
@@ -252,6 +266,14 @@ def main(argv=None) -> int:
     for worker in workers:
         worker.start()
     manager.restore()
+    if client is not None and is_farm_key(os.getenv("SMARTCATTLE_API_KEY")):
+        def moved_to(new_url):
+            # Every camera's link hangs from this address, and the panel reads them from their next report.
+            state.public_url = new_url
+            for camera in manager.all():
+                camera.state.public_url = f"{new_url}/cameras/{camera.camera_id}"
+
+        FarmLink(client.report_farm_pc, lambda: state.public_url, tunnel, moved_to).start(stop)
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
