@@ -23,6 +23,8 @@ SAME_PLACE = 0.15
 HEIGHT_RECOVERED = 0.85
 #: A new posture must hold this long: one bad frame must not make an animal drop and rise on screen.
 SETTLE_S = 2.0
+#: A box this close to the edge of the picture is a cut-off animal, so its shape says nothing.
+EDGE_MARGIN = 0.01
 #: How long a sample stays in memory: enough to compare with how the animal looked a moment ago.
 WINDOW_S = 60.0
 #: Speed is measured over at least this long: from one frame to the next, jitter looks like movement.
@@ -54,8 +56,18 @@ class PostureMonitor:
             if item["class"] != "cow" or item.get("track_id") is None:
                 result.append(item)
                 continue
+            if self._is_cut_off(item["bbox"], width, height):
+                known = self._tracks.get(item["track_id"])
+                result.append({**item, "posture": known.state} if known is not None else item)
+                continue
             result.append({**item, "posture": self._estimate(item, now)})
         return result
+
+    @staticmethod
+    def _is_cut_off(bbox, width: int, height: int) -> bool:
+        margin_x, margin_y = EDGE_MARGIN * width, EDGE_MARGIN * height
+        return (bbox[0] <= margin_x or bbox[1] <= margin_y
+                or bbox[2] >= width - margin_x or bbox[3] >= height - margin_y)
 
     def _estimate(self, item: dict, now: float) -> str:
         track = self._tracks.setdefault(item["track_id"], _Track())
