@@ -31,9 +31,10 @@ def status_of(url, headers=None, method="GET"):
 def serve():
     servers = []
 
-    def start(state=None, session_check=None, manager=None):
+    def start(state=None, session_check=None, manager=None, camera_check=None):
         state = state or LiveState("camera-01", ZONE)
-        server = make_server(state, Event(), "127.0.0.1", 0, [ORIGIN], manager=manager, session_check=session_check)
+        server = make_server(state, Event(), "127.0.0.1", 0, [ORIGIN], manager=manager, session_check=session_check,
+                             camera_check=camera_check)
         Thread(target=server.serve_forever, daemon=True).start()
         servers.append(server)
         return f"http://127.0.0.1:{server.server_address[1]}", state
@@ -87,7 +88,8 @@ def test_the_session_answer_is_remembered_so_a_burst_is_not_a_burst_on_the_backe
 
 
 def test_the_picture_needs_a_session_on_the_internet(serve):
-    url, state = serve(session_check=lambda authorization: authorization == "Bearer good")
+    url, state = serve(session_check=lambda authorization: authorization == "Bearer good",
+                       camera_check=lambda authorization, camera_id: authorization == "Bearer good")
     state.publish(b"jpeg", [], 2, 2, None)
     assert status_of(f"{url}/snapshot.jpg") == 403
     assert status_of(f"{url}/snapshot.jpg?token=bad") == 403
@@ -235,3 +237,10 @@ def test_a_capture_that_raises_counts_as_a_failed_read():
     stream._capture = Capture()
     assert stream.read() is None
     assert stream.state == "error"
+
+def test_a_valid_session_does_not_open_another_accounts_camera(serve):
+    url, state = serve(session_check=lambda authorization: True,
+                       camera_check=lambda authorization, camera_id: authorization == "Bearer owner")
+    state.publish(b"jpeg", [], 2, 2, None)
+    assert status_of(f"{url}/snapshot.jpg?token=stranger") == 403
+    assert status_of(f"{url}/snapshot.jpg?token=owner") == 200

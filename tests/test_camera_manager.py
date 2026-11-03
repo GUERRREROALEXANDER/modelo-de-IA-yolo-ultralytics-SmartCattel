@@ -271,7 +271,8 @@ def exposed_service():
 
     stop, manager = Event(), manager_for()
     server = make_server(LiveState("camera-01", ZONE), stop, "127.0.0.1", 0, [ORIGIN], manager=manager,
-                         session_check=session_check)
+                         session_check=session_check,
+                         camera_check=lambda authorization, camera_id: authorization == "Bearer good")
     Thread(target=server.serve_forever, daemon=True).start()
     yield manager, f"http://127.0.0.1:{server.server_address[1]}"
     stop.set()
@@ -304,7 +305,13 @@ def test_an_exposed_service_needs_a_session_even_with_the_right_origin(exposed_s
 
 def test_an_exposed_service_accepts_a_signed_in_person(exposed_service):
     manager, base = exposed_service
-    assert call_with(base, "/cameras", "POST", "Bearer good", {"url": "192.168.1.40:8080"}) == 202
+    assert call_with(base, "/cameras", "POST", "Bearer good",
+                     {"url": "192.168.1.40:8080", "camera_id": "cam-mine"}) == 202
+
+
+def test_an_exposed_service_only_runs_cameras_saved_in_the_account(exposed_service):
+    _, base = exposed_service
+    assert call_with(base, "/cameras", "POST", "Bearer good", {"url": "192.168.1.40:8080"}) == 403
 
 
 def test_watching_an_exposed_service_needs_no_session(exposed_service):
@@ -326,3 +333,13 @@ def test_removing_does_not_wait_for_the_backend():
     assert camera.stop.is_set() and not called.is_set()
     release.set()
     assert called.wait(5)
+
+
+def test_a_camera_runs_under_the_id_it_was_saved_with_and_keeps_it_after_a_restart(tmp_path):
+    path = tmp_path / "cameras.json"
+    before = manager_for(path)
+    assert before.add("rtsp://a/live", "cam-of-this-farm").camera_id == "cam-of-this-farm"
+    before.stop_all()
+    after = manager_for(path)
+    after.restore()
+    assert after.get("cam-of-this-farm").source == "rtsp://a/live"

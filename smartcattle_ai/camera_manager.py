@@ -121,8 +121,9 @@ class CameraManager:
         with self._lock:
             return any(camera.state.stalled() for camera in self._cameras.values())
 
-    def add(self, source: str) -> ManagedCamera:
-        camera_id = camera_id_for(check_source(source))
+    def add(self, source: str, camera_id: str | None = None) -> ManagedCamera:
+        """camera_id is the id the dashboard saved the camera under, so its reports reach that person's account."""
+        camera_id = camera_id or camera_id_for(check_source(source))
         with self._lock:
             camera = self._cameras.get(camera_id)
             if camera is not None:
@@ -154,13 +155,13 @@ class CameraManager:
             return
         try:
             saved = json.loads(self._path.read_text(encoding="utf-8"))
-            sources = [check_source(item["source"]) for item in saved]
-        except (OSError, ValueError, KeyError, TypeError) as exc:
+            entries = [(item.get("camera_id") or camera_id_for(check_source(item["source"])),
+                        check_source(item["source"])) for item in saved]
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             print(f"Warning: could not read the saved cameras: {type(exc).__name__}", file=sys.stderr)
             return
         with self._lock:
-            for source in sources[:self._max]:
-                camera_id = camera_id_for(source)
+            for camera_id, source in entries[:self._max]:
                 self._cameras[camera_id] = self._start(camera_id, source)
 
     def stop_all(self) -> list[str]:
@@ -180,7 +181,8 @@ class CameraManager:
     def _save(self) -> None:
         if self._path is None:
             return
-        body = json.dumps([{"source": camera.source} for camera in self._cameras.values()])
+        body = json.dumps([{"camera_id": camera.camera_id, "source": camera.source}
+                           for camera in self._cameras.values()])
         temporary = self._path.with_name(self._path.name + ".tmp")
         try:
             temporary.write_text(body, encoding="utf-8")

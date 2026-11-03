@@ -24,6 +24,17 @@ def session_is_valid(base_url: str, authorization: str, timeout: float = 5.0) ->
         return False
 
 
+def camera_is_owned(base_url: str, authorization: str, camera_id: str, timeout: float = 5.0) -> bool:
+    """Asks the backend whether this person's account has this camera saved. It answers 404 for anyone else's."""
+    if not authorization.startswith("Bearer "):
+        return False
+    request = Request(f"{base_url.rstrip('/')}/api/cameras/saved/{camera_id}", headers={"Authorization": authorization})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except (HTTPError, URLError, OSError):
+        return False
+
 class BackendClient:
     def __init__(self, base_url: str, api_key: str | None = None, timeout: float = 5.0):
         self.base_url = base_url.rstrip("/")

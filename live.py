@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from threading import Event, Thread
 
 from smartcattle_ai import Detector, Settings
-from smartcattle_ai.backend_client import BackendClient, BackendError, EventThrottle, session_is_valid
+from smartcattle_ai.backend_client import BackendClient, BackendError, EventThrottle, camera_is_owned, session_is_valid
 from smartcattle_ai.camera_manager import MAX_CAMERAS, CameraManager, ManagedCamera, SharedDetector, is_public_url
 from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
@@ -40,8 +40,11 @@ def main(argv=None) -> int:
     load_env_file()
     parser = argparse.ArgumentParser(description="Live camera detection served as MJPEG.")
     parser.add_argument("--url", help="Stream URL (rtsp://, http://), a phone camera app's address "
-                                      "(192.168.1.20:8080) or a webcam index (0, 1). Default: the Imou cloud "
-                                      "if IMOU_APP_ID is set, else CAMERA_URL, CAMERA_RTSP_URL or CAMERA_* variables")
+                                      "(192.168.1.20:8080) or a webcam index (0, 1), to open at start. "
+                                      "Default: no camera; each person connects theirs from the dashboard")
+    parser.add_argument("--auto-camera", action="store_true", default=os.getenv("SMARTCATTLE_AUTOSTART_CAMERA") == "1",
+                        help="Open the camera set in .env at start (Imou cloud if IMOU_APP_ID is set, else CAMERA_URL, "
+                             "CAMERA_RTSP_URL or CAMERA_* variables) and reconnect the saved dashboard cameras")
     parser.add_argument("--camera-id", default=os.getenv("CAMERA_ID") or os.getenv("SMARTCATTLE_CAMERA_ID") or "camera-01")
     parser.add_argument("--zone", default=os.getenv("SMARTCATTLE_ZONE") or "0.1,0.1,0.9,0.9")
     parser.add_argument("--backend-url", default=os.getenv("SMARTCATTLE_BACKEND_URL"))
@@ -77,8 +80,9 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        # Nothing opens by itself: a .env copied from another PC must not point this one at somebody else's camera.
         url = normalize_source(args.url) if args.url else (
-            imou_url_provider() if imou_configured() else camera_url_from_env())
+            (imou_url_provider() if imou_configured() else camera_url_from_env()) if args.auto_camera else None)
         zone = ZoneSet.from_rectangle(parse_zone(args.zone))
         if not CAMERA_ID.fullmatch(args.camera_id):
             # The backend's rule for camera ids; anything else would be a 422 on every report.
@@ -97,7 +101,8 @@ def main(argv=None) -> int:
             if getattr(args, name) <= 0:
                 raise ValueError(f"--{name.replace('_', '-')} must be positive")
         model = Detector(Settings.from_env())
-        model.class_ids  # Load the model now, not on the first frame.
+        if url is not None:
+            model.class_ids  # Load the model now, not on the first frame. With no camera it waits for the first one.
     except (ValueError, RuntimeError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -173,9 +178,14 @@ def main(argv=None) -> int:
             pass
 
     stop = Event()
-    state, stream, workers = build_camera(args.camera_id, url, stop,
-                                          args.public_url.rstrip("/") if args.public_url else None,
-                                          LineCounter(gate_line) if gate_line is not None else None)
+    public_url = args.public_url.rstrip("/") if args.public_url else None
+    if url is not None:
+        state, stream, workers = build_camera(args.camera_id, url, stop, public_url,
+                                              LineCounter(gate_line) if gate_line is not None else None)
+    else:
+        # Waiting for someone to connect a camera from the dashboard; /status and /health answer meanwhile.
+        state, stream, workers = LiveState(args.camera_id, zone, public_url), None, []
+        state.set_camera_status("idle")
 
     def added_stream_url(camera_id):
         return f"{state.public_url}/cameras/{camera_id}"
@@ -189,22 +199,25 @@ def main(argv=None) -> int:
         print(f"Camera {camera_id} added: {redact_url(source)}", flush=True)
         return ManagedCamera(camera_id, source, camera_state, camera_stream, camera_stop)
 
+    # The list holds camera passwords and only serves to reconnect by itself, so it is kept only when asked for that.
     manager = CameraManager(start_added_camera, added_stream_url, on_remove=on_camera_removed,
-                            path=os.getenv("SMARTCATTLE_CAMERAS_FILE") or ".cameras.json",
+                            path=(os.getenv("SMARTCATTLE_CAMERAS_FILE") or ".cameras.json") if args.auto_camera else None,
                             max_cameras=max_added_cameras(os.environ))
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
     # Listening on every interface is how other devices get here, so their browsers must be let in too,
     # and they must be told this PC's address: "localhost" would mean their own device.
     lan_address = local_ipv4() if args.host == "0.0.0.0" else None
     origins += lan_origins(lan_address)
-    session_check = None
+    session_check = camera_check = None
     if args.tunnel or is_public_url(args.public_url):
         # Reachable from the internet: changing cameras takes a dashboard session. No backend to ask means no one can.
         session_check = (lambda authorization: session_is_valid(args.backend_url, authorization)) if args.backend_url \
             else (lambda authorization: False)
+        if args.backend_url:
+            camera_check = lambda authorization, camera_id: camera_is_owned(args.backend_url, authorization, camera_id)
     try:
         server = make_server(state, stop, args.host, args.port, origins, camera=stream, manager=manager,
-                             session_check=session_check)
+                             session_check=session_check, camera_check=camera_check)
     except OSError as exc:
         print(f"Error: cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
@@ -224,9 +237,10 @@ def main(argv=None) -> int:
             server.server_close()
             return 1
     base = f"http://{lan_address or ('localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host)}:{args.port}"
-    print(f"Camera {args.camera_id}: {redact_url(str(url))}")
+    print(f"Camera {args.camera_id}: {redact_url(str(url))}" if url is not None
+          else "No camera yet: connect one from the Cameras page of the dashboard")
     print(f"Backend: {args.backend_url or 'disabled'}")
-    print(f"Video: {base}/video.mjpg  Status: {base}/status  (Ctrl+C to stop)")
+    print(f"Status: {base}/status  (Ctrl+C to stop)" + (f"  Video: {base}/video.mjpg" if url is not None else ""))
     if state.heat is not None:
         print(f"Heat map: {base}/heatmap.jpg")
     if state.public_url:
@@ -242,12 +256,13 @@ def main(argv=None) -> int:
         pass
     finally:
         stop.set()
-        stream.stop()
+        if stream is not None:
+            stream.stop()
         added = manager.stop_all()
         server.server_close()
         if tunnel is not None:
             tunnel.stop()
-        for camera_id in (args.camera_id, *added):
+        for camera_id in ((args.camera_id, *added) if url is not None else added):
             report_offline(camera_id)
     return 0
 

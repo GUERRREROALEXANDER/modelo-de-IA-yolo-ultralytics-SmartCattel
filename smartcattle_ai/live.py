@@ -394,6 +394,7 @@ MAX_CONNECTIONS = 256
 SOCKET_TIMEOUT_S = 20
 VIDEO_PATHS = frozenset({"/video.mjpg", "/snapshot.jpg", "/heatmap.jpg"})
 _CAMERA_HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
+_CAMERA_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _ADDED_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})(/[a-z.]+)")
 _REMOVE_CAMERA_PATH = re.compile(r"/cameras/([A-Za-z0-9_-]{1,64})")
 
@@ -452,12 +453,21 @@ def new_camera_source(body: dict, defaults=None) -> str:
     return check_reachable_from_cloud(source) if defaults.get("SMARTCATTLE_CLOUD") == "1" else source
 
 
-def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, manager=None, session_check=None):
+def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, manager=None, session_check=None,
+                 camera_check=None):
     """session_check(authorization) guards the requests that change cameras or look around the network. It is
-    set when this service can be reached from the internet, where Origin proves nothing: curl can forge it."""
+    set when this service can be reached from the internet, where Origin proves nothing: curl can forge it.
+    camera_check(authorization, camera_id) says whether that person's account owns the camera; without one, nobody's
+    does, because a valid session alone must not open another account's camera."""
     origins = {origin.rstrip("/") for origin in allowed_origins}
     public = session_check is not None
     session = SessionCache(session_check) if public else None
+
+    def owns(key: str) -> bool:
+        authorization, _, camera_id = key.rpartition("|")
+        return camera_check is not None and camera_check(authorization, camera_id)
+
+    ownership = SessionCache(owns) if public else None
     requests = RateLimit(MAX_REQUESTS_PER_MINUTE)
     dashboard_calls = RateLimit(MAX_DASHBOARD_CALLS_PER_MINUTE)
     streams = StreamSlots(MAX_STREAMS, MAX_STREAMS_PER_ADDRESS)
@@ -482,15 +492,23 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                 self.end_headers()
             return bool(wait)
 
-        def _may_watch(self) -> bool:
-            """On the internet the picture is for signed-in people. An <img> cannot send headers, hence the query."""
+        def _may_watch(self, camera_id: str) -> bool:
+            """On the internet a picture is only for the account that owns the camera. An <img> cannot send headers,
+            hence the query."""
             if not public:
                 return True
             token = parse_qs(self.path.partition("?")[2]).get("token", [""])[0]
             authorization = f"Bearer {token}" if token else self.headers.get("Authorization", "")
-            if session(authorization):
+            if ownership(f"{authorization}|{camera_id}"):
                 return True
-            self._json(403, {"detail": "Sign in to the dashboard to see this camera"})
+            self._json(403, {"detail": "Sign in to the account that owns this camera to see it"})
+            return False
+
+        def _owns_camera(self, camera_id: str | None) -> bool:
+            """True if the signed-in person may run this camera; otherwise it has been answered."""
+            if camera_id and ownership(f"{self.headers.get('Authorization', '')}|{camera_id}"):
+                return True
+            self._json(403, {"detail": "Save this camera in your account first"})
             return False
 
         def _cors(self) -> None:
@@ -542,7 +560,7 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                     self._json(404, {"detail": "Not found"})
                     return
                 view, view_stop, path = entry.state, entry.stop, added.group(2)
-            if path in VIDEO_PATHS and not self._may_watch():
+            if path in VIDEO_PATHS and not self._may_watch(view.camera_id):
                 return
             if path == "/health":
                 self._json(200, {"status": "ok"})
@@ -601,8 +619,14 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                 self._json(422, {"detail": str(error)})
                 return
             if route == "/cameras":
+                camera_id = body.get("camera_id")
+                if camera_id is not None and not (isinstance(camera_id, str) and _CAMERA_ID.fullmatch(camera_id)):
+                    self._json(422, {"detail": "camera_id must be 1 to 64 letters, digits, '-' or '_'"})
+                    return
+                if public and not self._owns_camera(camera_id):
+                    return
                 try:
-                    entry = manager.add(source)
+                    entry = manager.add(source, camera_id)
                 except CameraLimitError as error:
                     self._json(409, {"detail": str(error)})
                     return
@@ -620,6 +644,8 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
             if not added:
                 self._json(404, {"detail": "Not found"})
             elif not self._dashboard_only():
+                return
+            elif public and not self._owns_camera(added.group(1)):
                 return
             elif manager is None or not manager.remove(added.group(1)):
                 self._json(404, {"detail": "This camera was not added from the dashboard"})
@@ -679,10 +705,11 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
 
 
 def make_server(state: LiveState, stop: Event, host: str, port: int, allowed_origins=DEFAULT_ORIGINS, camera=None,
-                manager=None, session_check=None):
+                manager=None, session_check=None, camera_check=None):
     """camera, when given, is the CameraStream that POST /camera re-points (see CameraStream.switch);
     manager is the CameraManager behind POST and DELETE /cameras."""
-    server = BoundedHTTPServer((host, port), make_handler(state, stop, allowed_origins, camera, manager, session_check))
+    server = BoundedHTTPServer((host, port), make_handler(state, stop, allowed_origins, camera, manager, session_check,
+                                                                   camera_check))
     server.daemon_threads = True
     return server
 

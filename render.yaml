@@ -15,6 +15,9 @@ services:
       sizeGB: 1
     healthCheckPath: /health
     envVars:
+      # This service watches one fixed camera in the Imou cloud, so it opens it at start.
+      - key: SMARTCATTLE_AUTOSTART_CAMERA
+        value: "1"
       - key: SMARTCATTLE_CAMERAS_FILE
         value: /data/cameras.json
       - key: SMARTCATTLE_MAX_CAMERAS
