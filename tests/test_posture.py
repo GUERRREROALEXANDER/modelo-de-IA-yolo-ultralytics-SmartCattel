@@ -66,3 +66,18 @@ def test_a_cut_off_cow_says_nothing_new():
     assert "posture" not in monitor.update([cow([0, 300, 300, 400])], SIZE, SIZE, 0.0)[0]
     run(monitor, [[300, 200, 560, 500]] * 3)
     assert monitor.update([cow([0, 300, 300, 400])], SIZE, SIZE, 2.0)[0]["posture"] == STANDING
+
+
+def test_without_tracking_only_a_flat_box_says_anything():
+    monitor = PostureMonitor()
+    flat = {"class": "cow", "confidence": 0.9, "bbox": [300, 400, 600, 500]}
+    tall = {"class": "cow", "confidence": 0.9, "bbox": [300, 200, 500, 500]}
+    assert monitor.update([flat], SIZE, SIZE, 0.0)[0]["posture"] == LYING
+    assert "posture" not in monitor.update([tall], SIZE, SIZE, 0.0)[0]
+
+
+def test_people_and_a_trained_models_answer_are_left_alone():
+    monitor = PostureMonitor()
+    person = {"class": "person", "confidence": 0.9, "bbox": [300, 400, 600, 500], "track_id": 2}
+    trained = {**cow([300, 200, 500, 500]), "posture": LYING}
+    assert monitor.update([person, trained], SIZE, SIZE, 0.0) == [person, trained]
