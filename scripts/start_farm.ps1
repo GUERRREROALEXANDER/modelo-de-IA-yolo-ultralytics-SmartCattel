@@ -61,9 +61,11 @@ if (-not (Test-Path $python)) {
 $cloudflared = Find-Cloudflared
 if (-not $cloudflared) {
     Say 'Instalando la conexion segura hacia internet (cloudflared)...'
-    Install-WithWinget 'Cloudflare.cloudflared'
-    $cloudflared = Find-Cloudflared
-    if (-not $cloudflared) { throw 'cloudflared se instalo pero no aparece. Cierra esta ventana y vuelve a abrir el programa.' }
+    # The official single file, into this user's folder: it needs no administrator, so nobody has to be there to approve.
+    $folder = Join-Path $env:LOCALAPPDATA 'cloudflared'
+    New-Item -ItemType Directory -Force $folder | Out-Null
+    $cloudflared = Join-Path $folder 'cloudflared.exe'
+    Invoke-WebRequest 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile $cloudflared -UseBasicParsing
 }
 $env:SMARTCATTLE_CLOUDFLARED = $cloudflared
 
