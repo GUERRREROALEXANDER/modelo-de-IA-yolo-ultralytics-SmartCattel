@@ -17,7 +17,7 @@ import numpy as np
 from .backend_client import BackendError, occupancy_report
 from .camera_manager import CameraLimitError, check_reachable_from_cloud, check_source
 from .media import draw_detections
-from .discovery import scan_cameras
+from .discovery import local_ipv4, scan_cameras
 from .limits import RateLimit, SessionCache, StreamSlots, client_address
 from .rules import evaluate
 from .stream import camera_url_from_env, normalize_source, redact_url
@@ -323,6 +323,14 @@ def source_worker(client, camera_id: str, source: str, stop: Event, retry_s: flo
         stop.wait(retry_s)
 
 
+def _service_url(state, port: int) -> str | None:
+    """Where other devices reach this service: its public address, or else this PC on the network."""
+    if state.public_url:
+        return state.public_url
+    address = local_ipv4()
+    return f"http://{address}:{port}" if address else None
+
+
 def lan_origins(address: str | None, ports=(5173, 4173)) -> list[str]:
     """The dashboard as other devices open it: this PC's address, on the Vite ports."""
     return [f"http://{address}:{port}" for port in ports] if address else []
@@ -570,7 +578,7 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
                 self._json(200, {"status": "ok"})
             elif path == "/status":
                 # service_url lets the dashboard on this PC build a link a phone on the same wifi can open.
-                self._json(200, {**view.snapshot(), "service_url": state.public_url})
+                self._json(200, {**view.snapshot(), "service_url": _service_url(state, self.server.server_address[1])})
             elif path == "/snapshot.jpg":
                 jpeg = view.latest_jpeg()
                 if jpeg is None:
