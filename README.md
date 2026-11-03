@@ -350,6 +350,8 @@ The first command runs the whole suite (256 tests), **including** tests marked `
 
 ## Limitations
 
+- A cow's posture is estimated from its box and has not been measured on real footage. See "What each cow is doing".
+
 - **Small dataset.** 404 images, 94 in test. Results do not establish performance on other farms, cameras, weather, or lighting, and nothing has been measured on the target farm's camera yet.
 - **Recall.** At confidence 0.35 the model still misses 53 of 152 test cows (recall 0.651) and 91 of 153 test persons (recall 0.405).
 - **Distant and crowded cows.** Very small distant cows and tightly overlapping herds are the weakest scenarios; the fine-tuned model is worse than pretrained on tiny distant cows.
