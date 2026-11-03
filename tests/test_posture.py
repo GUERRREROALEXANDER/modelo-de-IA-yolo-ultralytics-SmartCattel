@@ -52,3 +52,10 @@ def test_a_long_rest_stays_lying_and_getting_up_ends_it():
     run(monitor, [[300, 320, 560, 500]] * 10, start=5.0)
     assert run(monitor, [[300, 320, 560, 500]] * 10, start=600.0) == LYING
     assert run(monitor, [[300, 200, 560, 500]] * 10, start=700.0) == STANDING
+
+
+def test_one_bad_frame_does_not_change_the_posture():
+    monitor = PostureMonitor()
+    run(monitor, [[300, 200, 560, 500]] * 10)
+    assert run(monitor, [[300, 320, 560, 500]], start=5.0) == STANDING
+    assert run(monitor, [[300, 200, 560, 500]] * 3, start=5.5) == STANDING
