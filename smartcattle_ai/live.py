@@ -608,6 +608,13 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
 
         def do_POST(self):
             route = self.path.split("?", 1)[0]
+            # Read even to refuse: on Windows, closing with the body unread cuts the connection, and the browser
+            # sees a network failure in place of the answer.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            sent = self.rfile.read(length) if 0 < length <= MAX_CAMERA_BODY else b""
             if route not in ("/camera", "/cameras"):
                 self._json(404, {"detail": "Not found"})
                 return
@@ -617,15 +624,11 @@ def make_handler(state: LiveState, stop: Event, allowed_origins, camera=None, ma
             if (camera if route == "/camera" else manager) is None:
                 self._json(503, {"detail": "This service cannot change cameras"})
                 return
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                length = -1
             if length <= 0 or length > MAX_CAMERA_BODY:
                 self._json(400, {"detail": "Send a JSON body"})
                 return
             try:
-                body = json.loads(self.rfile.read(length))
+                body = json.loads(sent)
                 if not isinstance(body, dict):
                     raise ValueError("Send a JSON object")
                 source = new_camera_source(body) if route == "/cameras" else camera_source_from_request(body)
