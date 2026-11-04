@@ -14,7 +14,7 @@ from urllib.parse import parse_qs
 import cv2
 import numpy as np
 
-from .backend_client import BackendError, occupancy_report
+from .backend_client import BackendError, detection_log_report, occupancy_report
 from .camera_manager import CameraLimitError, check_reachable_from_cloud, check_source
 from .media import draw_detections
 from .discovery import local_ipv4, no_answer, scan_cameras
@@ -22,6 +22,7 @@ from .limits import RateLimit, SessionCache, StreamSlots, client_address
 from .pushed import PUSHED_SOURCE
 from .rules import evaluate
 from .stream import camera_url_from_env, normalize_source, redact_url
+from .tracking import track_frame
 from .zones import ZoneSet, as_zone_set
 
 DEFAULT_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173",
@@ -64,6 +65,8 @@ class LiveState:
         self.gate = None
         # Optional posture estimate; only the detection thread uses it.
         self.posture = None
+        # Optional sender of what must reach a person; only the detection thread uses it.
+        self.anomalies = None
         # Optional heat map; the detection thread adds to it, /heatmap.jpg reads a copy of its grid.
         self.heat = None
         # Base URL where browsers reach this server (e.g. a tunnel); reported to the backend while online.
@@ -214,12 +217,10 @@ def _process_frame(frame, detector, state, publisher, jpeg_quality, tracker, sti
                    fps, last):
     height, width = frame.shape[:2]
     zone = state.zone
-    detections = detector.detect(frame)
-    if tracker is not None:
-        detections = tracker.update(detections)
+    detections = track_frame(detector, tracker, frame) if tracker is not None else detector.detect(frame)
     detections = classify_zone(detections, width, height, zone)
     if state.posture is not None:
-        detections = state.posture.update(detections, width, height, time.time())
+        detections = state.posture.update(detections, width, height, time.time(), frame)
     if stillness is not None:
         detections = mark_still(stillness, detections, width, height, time.time(), state.camera_id)
     if night is not None:
@@ -236,6 +237,8 @@ def _process_frame(frame, detector, state, publisher, jpeg_quality, tracker, sti
                   f"(in {state.gate.entered}, out {state.gate.exited})", flush=True)
     if publisher is not None:
         publisher.handle(detections, width, height, time.time())
+    if state.anomalies is not None:
+        state.anomalies.handle(detections, time.time())
     ok, encoded = cv2.imencode(".jpg", draw_detections(frame, detections, zone, state.gate),
                                [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
     now = time.monotonic()
@@ -335,6 +338,29 @@ def _service_url(state, port: int) -> str | None:
 def lan_origins(address: str | None, ports=(5173, 4173)) -> list[str]:
     """The dashboard as other devices open it: this PC's address, on the Vite ports."""
     return [f"http://{address}:{port}" for port in ports] if address else []
+
+
+#: The backend keeps the last report of each minute: this catches every minute, and a failed send gets a second chance.
+DETECTION_LOG_INTERVAL_S = 30.0
+
+
+def detection_log_worker(client, state: LiveState, stop: Event, interval_s: float = DETECTION_LOG_INTERVAL_S) -> None:
+    """Feeds the daily report. Empty scenes too: they tell a quiet pasture from a camera that was not watching."""
+    warned = False
+    last_sent = None
+    while not stop.wait(interval_s):
+        snapshot = state.snapshot()
+        captured_at = snapshot["captured_at"]
+        if snapshot["status"] != "online" or captured_at is None or captured_at == last_sent:
+            continue
+        try:
+            client.report_detection_log(state.camera_id, detection_log_report(snapshot["detections"], captured_at))
+            last_sent = captured_at
+            warned = False
+        except BackendError as exc:
+            if not warned:
+                print(f"Warning: could not report the detection log: {exc}", file=sys.stderr)
+            warned = True
 
 
 def occupancy_worker(client, state: LiveState, stop: Event, interval_s: float) -> None:

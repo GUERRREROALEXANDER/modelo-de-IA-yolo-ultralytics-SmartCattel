@@ -108,6 +108,9 @@ class BackendClient:
     def report_occupancy(self, camera_id: str, report: dict) -> None:
         self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/occupancy", report, "PUT")
 
+    def report_detection_log(self, camera_id: str, report: dict) -> None:
+        self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/detection-log", report, "PUT")
+
     def claim_video_job(self) -> dict | None:
         """The oldest uploaded video waiting for analysis, or None when the queue is empty."""
         status, response = self._request("/api/ai/video-jobs/claim", {}, "POST")
@@ -168,6 +171,23 @@ def occupancy_report(detections: list[dict], width: int, height: int, observed_a
     inside = sum(item.get("inside_zone") is True for item in cattle)
     return {"cattle_inside": inside, "cattle_outside": len(cattle) - inside, "observed_at": observed_at,
             "detections": backend_detections(detections, width, height)}
+
+
+def detection_log_report(detections: list[dict], observed_at: str) -> dict:
+    """The body of PUT /api/ai/cameras/{id}/detection-log: what the frame holds, counted by posture."""
+    cattle = [item for item in detections if item["class"] == "cow"]
+    people = [item for item in detections if item["class"] == "person"]
+    counted = cattle + people
+    postures = [item.get("posture") for item in cattle]
+    report = {
+        "cattle_lying": postures.count("lying"), "cattle_standing": postures.count("standing"),
+        "cattle_walking": postures.count("walking"),
+        "cattle_unknown": sum(posture not in ("lying", "standing", "walking") for posture in postures),
+        "people": len(people), "observed_at": observed_at,
+    }
+    if counted:
+        report["avg_confidence"] = round(sum(item["confidence"] for item in counted) / len(counted), 4)
+    return report
 
 
 def to_backend_event(rule_event: dict, camera_id: str) -> dict:

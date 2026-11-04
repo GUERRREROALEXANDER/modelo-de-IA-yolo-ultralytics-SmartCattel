@@ -23,14 +23,16 @@ from smartcattle_ai.env import load_env_file
 from smartcattle_ai.imou import imou_configured, imou_url_provider
 from smartcattle_ai.discovery import local_ipv4
 from smartcattle_ai.live import (
-    DEFAULT_ORIGINS, LatestFrame, LiveState, VisitorLog, capture_worker, detection_worker, lan_origins, make_server,
-    occupancy_worker, source_worker, status_worker, zone_sync_worker,
+    DEFAULT_ORIGINS, LatestFrame, LiveState, VisitorLog, capture_worker, detection_log_worker, detection_worker,
+    lan_origins, make_server, occupancy_worker, source_worker, status_worker, zone_sync_worker,
 )
 from smartcattle_ai.heatmap import HeatMap
 from smartcattle_ai.line_counter import LineCounter, parse_line
 from smartcattle_ai.night_watch import NightWatch, parse_window
 from smartcattle_ai.pipeline import EventPublisher, parse_zone
+from smartcattle_ai.anomalies import DOWN_AFTER_MINUTES, AnomalyPublisher
 from smartcattle_ai.posture import PostureMonitor
+from smartcattle_ai.posture_classifier import load_default_classifier
 from smartcattle_ai.stream import CameraStream, address_only, camera_url_from_env, normalize_source, redact_url
 from smartcattle_ai.stillness import StillnessMonitor
 from smartcattle_ai.tracking import IoUTracker
@@ -68,8 +70,10 @@ def main(argv=None) -> int:
                         help="Warn about a cow that has not moved for this long (0 turns it off)")
     parser.add_argument("--gate-line", default=os.getenv("SMARTCATTLE_GATE_LINE") or None,
                         help="Count cattle crossing the line x1,y1,x2,y2 (fractions of the frame), e.g. a gate")
-    parser.add_argument("--night-window", default=os.getenv("SMARTCATTLE_NIGHT_WINDOW") or None,
-                        help="Warn about people seen in this local window, e.g. 20:00-05:30")
+    parser.add_argument("--down-after-minutes", type=float, default=DOWN_AFTER_MINUTES,
+                        help="Alert about a cow lying without moving for this long (0 turns it off)")
+    parser.add_argument("--night-window", default=os.getenv("SMARTCATTLE_NIGHT_WINDOW", "20:00-05:30") or None,
+                        help="Alert about people seen in this local window; empty SMARTCATTLE_NIGHT_WINDOW turns it off")
     parser.add_argument("--timezone", default=os.getenv("SMARTCATTLE_TIMEZONE") or "America/Bogota",
                         help="Time zone of --night-window")
     parser.add_argument("--no-heatmap", action="store_true",
@@ -104,13 +108,16 @@ def main(argv=None) -> int:
         if night_window is not None:
             NightWatch(night_window, args.timezone)  # Reject a bad time zone now, not on the first camera.
         if night_window is not None and args.no_tracking:
-            raise ValueError("--night-window needs tracking; remove --no-tracking")
+            night_window = None  # The default window must not stop --no-tracking; people need a number to be told once.
+        if args.down_after_minutes < 0:
+            raise ValueError("--down-after-minutes must be 0 or more")
         if args.still_after_minutes < 0:
             raise ValueError("--still-after-minutes must be 0 or more")
         for name in ("occupancy_interval", "zone_sync_interval", "status_interval"):
             if getattr(args, name) <= 0:
                 raise ValueError(f"--{name.replace('_', '-')} must be positive")
-        model = Detector(Settings.from_env())
+        settings = Settings.from_env()
+        model = Detector(settings)
         if url is not None:
             model.class_ids  # Load the model now, not on the first frame. With no camera it waits for the first one.
     except (ValueError, RuntimeError, OSError) as exc:
@@ -118,6 +125,7 @@ def main(argv=None) -> int:
         return 1
     # One model in memory, however many cameras the dashboard adds.
     detector = SharedDetector(model)
+    posture_classifier = load_default_classifier(settings.device)
 
     client = None
     if args.backend_url:
@@ -131,7 +139,7 @@ def main(argv=None) -> int:
         """One camera's state and threads, not started yet."""
         camera_state = LiveState(camera_id, zone, public_url)
         camera_state.gate = gate
-        camera_state.posture = PostureMonitor()
+        camera_state.posture = PostureMonitor(posture_classifier)
         if not args.no_heatmap:
             camera_state.heat = HeatMap()
         frames = LatestFrame()
@@ -149,6 +157,8 @@ def main(argv=None) -> int:
         workers = [Thread(target=capture_worker, args=(stream, frames, camera_stop), daemon=True)]
         if client is not None:
             publisher = EventPublisher(client, camera_id, zone, EventThrottle(args.event_cooldown))
+            if not args.no_tracking:
+                camera_state.anomalies = AnomalyPublisher(client, camera_id, args.down_after_minutes * 60)
             if isinstance(source, str):
                 workers.append(Thread(target=source_worker, args=(client, camera_id, address_only(source), camera_stop),
                                       daemon=True))
@@ -156,13 +166,15 @@ def main(argv=None) -> int:
                                   daemon=True))
             workers.append(Thread(target=occupancy_worker,
                                   args=(client, camera_state, camera_stop, args.occupancy_interval), daemon=True))
+            workers.append(Thread(target=detection_log_worker, args=(client, camera_state, camera_stop), daemon=True))
             workers.append(Thread(target=zone_sync_worker,
                                   args=(client, camera_state, zone, camera_stop, args.zone_sync_interval, publisher),
                                   daemon=True))
         tracker = None if args.no_tracking else IoUTracker()
         # Stillness needs the animal's number, so it is off without tracking.
-        stillness = (StillnessMonitor(still_after_s=args.still_after_minutes * 60)
-                     if tracker is not None and args.still_after_minutes > 0 else None)
+        wants_stillness = args.still_after_minutes > 0 or args.down_after_minutes > 0
+        stillness = (StillnessMonitor(still_after_s=(args.still_after_minutes or args.down_after_minutes) * 60)
+                     if tracker is not None and wants_stillness else None)
         night = NightWatch(night_window, args.timezone) if night_window is not None else None
         workers.append(Thread(target=detection_worker, args=(detector, frames, camera_state, camera_stop, publisher),
                               kwargs={"tracker": tracker, "stillness": stillness,
