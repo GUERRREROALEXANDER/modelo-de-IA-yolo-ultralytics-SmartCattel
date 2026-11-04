@@ -12,6 +12,42 @@ class BackendError(Exception):
         self.status = status
 
 
+def session_is_valid(base_url: str, authorization: str, timeout: float = 5.0) -> bool:
+    """Asks the backend whether this Authorization header belongs to a signed-in person."""
+    if not authorization.startswith("Bearer "):
+        return False
+    request = Request(f"{base_url.rstrip('/')}/api/auth/me", headers={"Authorization": authorization})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except (HTTPError, URLError, OSError):
+        return False
+
+
+def session_on_this_farm(base_url: str, authorization: str, farm_key: str, timeout: float = 5.0) -> bool:
+    """Whether this Authorization header belongs to someone in the account this PC is linked to."""
+    if not authorization.startswith("Bearer "):
+        return False
+    request = Request(f"{base_url.rstrip('/')}/api/ai/farm-pc/access",
+                      headers={"Authorization": authorization, "X-API-Key": farm_key})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return response.status == 204
+    except (HTTPError, URLError, OSError):
+        return False
+
+
+def camera_is_owned(base_url: str, authorization: str, camera_id: str, timeout: float = 5.0) -> bool:
+    """Asks the backend whether this person's account has this camera saved. It answers 404 for anyone else's."""
+    if not authorization.startswith("Bearer "):
+        return False
+    request = Request(f"{base_url.rstrip('/')}/api/cameras/saved/{camera_id}", headers={"Authorization": authorization})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except (HTTPError, URLError, OSError):
+        return False
+
 class BackendClient:
     def __init__(self, base_url: str, api_key: str | None = None, timeout: float = 5.0):
         self.base_url = base_url.rstrip("/")
@@ -34,7 +70,7 @@ class BackendClient:
         except HTTPError as exc:
             try:
                 detail = json.load(exc).get("detail")
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, OSError):  # OSError: the connection dropped during the answer.
                 detail = None
             raise BackendError(f"Backend HTTP {exc.code}: {detail or exc.reason}", exc.code) from exc
         except (URLError, OSError) as exc:
@@ -56,6 +92,14 @@ class BackendClient:
         _, response = self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/status", report, "PUT")
         return response
 
+    def report_farm_pc(self, url: str) -> None:
+        """Where browsers reach this PC now. Only a PC linked to an account has somewhere to report it."""
+        self._request("/api/ai/farm-pc", {"url": url}, "PUT")
+
+    def report_camera_source(self, camera_id: str, source: str, active: bool = True) -> None:
+        """Where the camera is reached, for the database. Callers pass it without credentials."""
+        self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/source", {"source": source, "active": active}, "PUT")
+
     def camera_zones(self, camera_id: str) -> list[dict]:
         """The camera's active safe zones, as drawn in the dashboard."""
         _, response = self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/zones")
@@ -63,6 +107,9 @@ class BackendClient:
 
     def report_occupancy(self, camera_id: str, report: dict) -> None:
         self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/occupancy", report, "PUT")
+
+    def report_detection_log(self, camera_id: str, report: dict) -> None:
+        self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/detection-log", report, "PUT")
 
     def claim_video_job(self) -> dict | None:
         """The oldest uploaded video waiting for analysis, or None when the queue is empty."""
@@ -108,8 +155,11 @@ def backend_detections(detections: list[dict], width: int, height: int, limit: i
         box = normalized_box(item["bbox"], width, height)
         if box is None:
             continue
-        result.append({"track_id": item.get("track_id"), "label": "cow", "confidence": item["confidence"],
-                       "bbox": box, "inside_zone": bool(item["inside_zone"])})
+        report = {"track_id": item.get("track_id"), "label": "cow", "confidence": item["confidence"],
+                  "bbox": box, "inside_zone": bool(item["inside_zone"])}
+        if item.get("posture"):
+            report["posture"] = item["posture"]
+        result.append(report)
         if len(result) == limit:
             break
     return result
@@ -121,6 +171,23 @@ def occupancy_report(detections: list[dict], width: int, height: int, observed_a
     inside = sum(item.get("inside_zone") is True for item in cattle)
     return {"cattle_inside": inside, "cattle_outside": len(cattle) - inside, "observed_at": observed_at,
             "detections": backend_detections(detections, width, height)}
+
+
+def detection_log_report(detections: list[dict], observed_at: str) -> dict:
+    """The body of PUT /api/ai/cameras/{id}/detection-log: what the frame holds, counted by posture."""
+    cattle = [item for item in detections if item["class"] == "cow"]
+    people = [item for item in detections if item["class"] == "person"]
+    counted = cattle + people
+    postures = [item.get("posture") for item in cattle]
+    report = {
+        "cattle_lying": postures.count("lying"), "cattle_standing": postures.count("standing"),
+        "cattle_walking": postures.count("walking"),
+        "cattle_unknown": sum(posture not in ("lying", "standing", "walking") for posture in postures),
+        "people": len(people), "observed_at": observed_at,
+    }
+    if counted:
+        report["avg_confidence"] = round(sum(item["confidence"] for item in counted) / len(counted), 4)
+    return report
 
 
 def to_backend_event(rule_event: dict, camera_id: str) -> dict:

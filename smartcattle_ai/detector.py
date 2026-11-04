@@ -9,12 +9,17 @@ from .config import Settings
 from .model_loader import load_model
 
 
+#: Classes of a model trained on postures: each one is a cow, and says what it is doing.
+POSTURE_CLASSES = {"cow_standing": "standing", "cow_lying": "lying"}
+
+
 class Detector:
     def __init__(self, settings: Settings | None = None, model=None, person_model=None):
         self.settings = settings or Settings()
         self._model = model
         self._person_model = person_model
         self._routes = None
+        self._posture_ids = {}
         self._lock = Lock()
 
     def _prepare(self) -> None:
@@ -23,7 +28,9 @@ class Detector:
         if self._model is None:
             self._model = load_model(self.settings.weights)
 
-        primary_names = set(self._model.names.values())
+        self._posture_ids = {class_id: POSTURE_CLASSES[name] for class_id, name in self._model.names.items()
+                             if name in POSTURE_CLASSES}
+        primary_names = set(self._model.names.values()) | ({"cow"} if self._posture_ids else set())
         missing = set(self.settings.class_names) - primary_names
         same_weights = Path(self.settings.weights).resolve() == Path(self.settings.person_weights).resolve()
         if missing and not same_weights and self._person_model is None:
@@ -36,7 +43,7 @@ class Detector:
             if selected is None:
                 raise RuntimeError(f"Requested class {name!r} does not exist in the model")
             class_ids = [class_id for class_id, class_name in selected.names.items()
-                         if class_name == name]
+                         if class_name == name or (name == "cow" and class_name in POSTURE_CLASSES)]
             if not class_ids:
                 raise RuntimeError(f"Requested class {name!r} does not exist in the model")
             key = id(selected)
@@ -54,13 +61,23 @@ class Detector:
                                       for class_id in names))
 
     def detect(self, frame: np.ndarray) -> list[dict]:
+        return self._predict(frame, self.settings.confidence)
+
+    def detect_with_weak(self, frame: np.ndarray) -> tuple[list[dict], list[dict]]:
+        """(detections, weak ones): one prediction split in two, so asking for the weak ones costs no second pass."""
+        threshold = self.settings.confidence
+        found = self._predict(frame, min(self.settings.weak_confidence, threshold))
+        return ([item for item in found if item["confidence"] >= threshold],
+                [item for item in found if item["confidence"] < threshold])
+
+    def _predict(self, frame: np.ndarray, confidence: float) -> list[dict]:
         with self._lock:
             self._prepare()
             detections = []
             for model, names in self._routes:
                 result = model.predict(
                     frame,
-                    conf=self.settings.confidence,
+                    conf=confidence,
                     iou=self.settings.iou,
                     imgsz=self.settings.imgsz,
                     classes=list(names),
@@ -71,9 +88,12 @@ class Detector:
                     class_id = int(box.cls.item())
                     if class_id not in names:
                         continue
-                    detections.append({
+                    detection = {
                         "class": names[class_id],
                         "confidence": round(float(box.conf.item()), 4),
                         "bbox": [round(float(value), 1) for value in box.xyxy[0].tolist()],
-                    })
+                    }
+                    if model is self._model and class_id in self._posture_ids:
+                        detection["posture"] = self._posture_ids[class_id]
+                    detections.append(detection)
             return sorted(detections, key=lambda item: item["confidence"], reverse=True)

@@ -1,6 +1,7 @@
 # Fine-tuned cattle weights
 
-Model weights are not committed. Run the following commands from the repository root.
+Model weights are not committed, except the two the service needs to start: `cattle_coco_yolo11n_best.pt` and the
+posture classifier `cattle_posture_cls.pt` (see "What each cow is doing" in the main README). Run the following commands from the repository root.
 First build the cleaned cattle dataset and local Open Images metadata with
 `python scripts/build_dataset.py` if they are not already available.
 

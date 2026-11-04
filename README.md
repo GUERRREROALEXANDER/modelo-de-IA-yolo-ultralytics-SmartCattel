@@ -331,6 +331,7 @@ For videos, `--event-cooldown` defaults to 10 seconds per camera ID, measured in
 | `SMARTCATTLE_IOU` | `0.5` | Inference NMS IoU; `--iou`. |
 | `SMARTCATTLE_IMGSZ` | `640` | Input size; `--imgsz`. |
 | `SMARTCATTLE_CLASSES` | `cow,person` | Output classes; `--classes`. Also allowed: `dog`, `horse`, `sheep`, `bear` (see Other animals). |
+| `SMARTCATTLE_WEAK_CONF` | `0.15` | Weakest detection kept when it lies on an animal already followed. |
 | `SMARTCATTLE_DEVICE` | CUDA `0` if available, else `cpu` | Inference device; `--device`. |
 | `SMARTCATTLE_BACKEND_URL` | Unset | Enables publishing; `--backend-url`. |
 | `SMARTCATTLE_API_KEY` | Unset | Event `X-API-Key`; environment only. |
@@ -350,6 +351,8 @@ The first command runs the whole suite (256 tests), **including** tests marked `
 
 ## Limitations
 
+- A cow's posture was measured on labelled photographs and on walking herds, but never on real night footage. See "What each cow is doing".
+
 - **Small dataset.** 404 images, 94 in test. Results do not establish performance on other farms, cameras, weather, or lighting, and nothing has been measured on the target farm's camera yet.
 - **Recall.** At confidence 0.35 the model still misses 53 of 152 test cows (recall 0.651) and 91 of 153 test persons (recall 0.405).
 - **Distant and crowded cows.** Very small distant cows and tightly overlapping herds are the weakest scenarios; the fine-tuned model is worse than pretrained on tiny distant cows.
@@ -360,7 +363,7 @@ The first command runs the whole suite (256 tests), **including** tests marked `
 
 ## Live camera
 
-`live.py` reads the IMOU camera over RTSP (credentials from `.env`, see `.env.example`), runs the detector on the newest frame only (about 10 FPS on CPU), and serves on `http://localhost:8090`:
+`live.py` starts with no camera and loads no model until someone connects a camera from the Cameras page of the dashboard. `--url` opens one at start, and `--auto-camera` opens the one in `.env` and reconnects the saved list. For each camera it runs the detector on the newest frame only (about 10 FPS on CPU), and serves on `http://localhost:8090`:
 
 | Path | Content |
 | --- | --- |
@@ -377,7 +380,9 @@ With `SMARTCATTLE_BACKEND_URL` set it also:
 - loads the safe zones drawn in the dashboard (`GET /api/ai/cameras/{id}/zones`) and reloads them every 30 s (`--zone-sync-interval`), so a new or edited zone applies without a restart. Polygons are honored, and with several zones an animal is safe in any of them. When the camera has no active zone, `--zone` / `SMARTCATTLE_ZONE` applies; when the backend cannot be reached, the zone in use stays;
 - posts an out-of-zone event **once per escape**: each cow gets a number (`track_id`) that follows it from frame to frame, and it is reported when it leaves the zone, not on every frame it stays out. It can be reported again after being seen back inside. `--event-cooldown` still spaces events per camera, so a whole herd walking out becomes a trickle of alerts. `--no-tracking` returns to one event per cooldown.
 
-**A cow that stops moving.** A tracked cow whose center stays within 2 % of the frame for 30 minutes (`--still-after-minutes`, `0` turns it off) may be down, sick or calving. It is drawn in magenta with `STILL <minutes>m`, carries `still: true` and `still_for_s` in `/status`, and the console warns once per still period. Walking restarts the clock. The backend has no event type for it yet, so the warning stays in this service. It needs tracking, so `--no-tracking` turns it off too.
+**A cow that stops moving.** A tracked cow whose center stays within 2 % of the frame for 30 minutes (`--still-after-minutes`, `0` turns it off) may be down, sick or calving. It is drawn in magenta with `STILL <minutes>m`, carries `still: true` and `still_for_s` in `/status`, and the console warns once per still period. Walking restarts the clock, while a tracker that loses a resting cow does not: the number it comes back with inherits the clock if it reappears in the same spot within 15 minutes. It needs tracking, so `--no-tracking` turns it off too.
+
+**A cow down.** Cattle rest around half the day, so lying or holding still is not an alarm. Lying without moving for 4 hours (`--down-after-minutes`, `0` turns it off) sends a `cattle_down` event once per resting period, which the backend turns into a high alert. The 4 hours are a starting point, not a veterinary rule. It needs the backend's `feat/anomaly-alerts` or later, which knows the type.
 
 **Counting through a gate.** `--gate-line x1,y1,x2,y2` (or `SMARTCATTLE_GATE_LINE`), in fractions of the frame, draws a yellow line, for example across a gate or a corridor, and counts each tracked cow that walks across it, once per crossing. A cow that walks around the end of the line is not counted. Which way is "in" depends on the order of the two points: for a line drawn top to bottom (`0.5,0,0.5,1`), walking from the right half of the image to the left half is "in". Swap the two points to reverse it. The totals are drawn on the video, returned as `gate` in `/status` and printed in the console. They start at zero when the service starts and are not sent to the backend. The counter needs tracking.
 
@@ -385,9 +390,9 @@ With `SMARTCATTLE_BACKEND_URL` set it also:
 python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091 --gate-line 0.5,0,0.5,1
 ```
 
-**Other animals.** The fine-tuned model kept the 80-class COCO head, so it still recognizes dogs (16), horses (17), sheep (18) and bears (21) in the same prediction, at no extra cost. They are off by default; turn them on with `SMARTCATTLE_CLASSES=cow,person,dog,horse`. They are drawn in cyan and counted apart on the video, and they are never counted as cattle, checked against the zone or sent to the backend's head count. A dog or a bear, which can scatter or attack the herd, is announced once per animal in the console. These classes were not part of the fine-tuning data, so their accuracy is COCO's, not measured on farm footage.
+**Other animals.** The fine-tuned model kept the 80-class COCO head, so it still recognizes dogs (16), horses (17), sheep (18) and bears (21) in the same prediction, at no extra cost. They are off by default; turn them on with `SMARTCATTLE_CLASSES=cow,person,dog,horse`. They are drawn in cyan and counted apart on the video, and they are never counted as cattle, checked against the zone or sent to the backend's head count. A dog or a bear, which can scatter or attack the herd, is announced once per animal in the console and sent as `external_animal_detected`. They stay off by default because a farm's own dog would raise alerts all day. These classes were not part of the fine-tuning data, so their accuracy is COCO's, not measured on farm footage.
 
-**People at night.** With `--night-window 20:00-05:30` (or `SMARTCATTLE_NIGHT_WINDOW`), a person seen inside that local window is drawn in red with `NIGHT`, carries `night: true` in `/status`, and is announced once in the console: at that hour nobody is expected among the animals. The window may cross midnight and is read in `--timezone` (`SMARTCATTLE_TIMEZONE`, `America/Bogota` by default), so it works the same on a PC in Colombia and on a server in UTC. It is off by default and needs tracking.
+**People at night.** With `--night-window 20:00-05:30` (or `SMARTCATTLE_NIGHT_WINDOW`), a person seen inside that local window is drawn in red with `NIGHT`, carries `night: true` in `/status`, is announced once in the console and is sent as `possible_intrusion`: at that hour nobody is expected among the animals. The window may cross midnight and is read in `--timezone` (`SMARTCATTLE_TIMEZONE`, `America/Bogota` by default), so it works the same on a PC in Colombia and on a server in UTC. The window is 20:00-05:30 unless set; an empty `SMARTCATTLE_NIGHT_WINDOW` turns it off. It needs tracking.
 
 **Heat map.** Every frame drops the ground point of each cow into a 32×18 grid. `/heatmap.jpg` paints it over the latest frame (blue: seldom, red: most of the time), which shows where the herd gathers: shade, water, a corner of the pen. It counts sightings, not distinct animals, starts empty on every start, and `/status` reports how many positions it holds as `heatmap_samples`. `--no-heatmap` turns it off.
 
@@ -395,7 +400,8 @@ A backend that is down does not stop the video. `/status` also returns `zones` (
 
 ```powershell
 python probe_camera.py --duration 10 --reconnect-test   # check the stream first
-python live.py                                          # camera + YOLO + video server
+python live.py                                          # waits for a camera from the dashboard
+python live.py --url 1                                  # opens webcam 1 right away
 powershell -ExecutionPolicy Bypass -File scripts\start_local.ps1   # backend, live.py and frontend together
 ```
 
@@ -429,6 +435,103 @@ python live.py --url 192.168.1.20:8080 --camera-id celular-01 --port 8091   # ph
 ```
 
 A phone on the farm network is reachable only from a PC on that network, so its `live.py` runs on that PC, not on Render. Use `--tunnel` to show its video in a hosted frontend.
+
+### Adding cameras from the dashboard
+
+The **Connect a camera** form on the Cameras page adds a camera next to the ones already running. `live.py` opens it from the farm PC, so a backend in the cloud never needs to reach a private address. All cameras share one process, one model and one port, so they take turns on the CPU, and a PC runs at most 8 added cameras.
+
+| Request | Effect |
+| --- | --- |
+| `POST /cameras` | `{"host": "192.168.1.50", "password": "...", "username": "...", "path": "/live"}` or `{"url": "rtsp://..."}`. Answers `202` with `camera_id` and `stream_url` (`<service>/cameras/<id>`) |
+| `GET /cameras/<id>/status`, `/video.mjpg`, `/snapshot.jpg`, `/heatmap.jpg` | The same as the service's own paths, for that camera |
+| `DELETE /cameras/<id>` | Stops the camera and forgets it |
+
+The saved password of `CAMERA_HOST` is used only for that host; any other address must bring its own. The list and its passwords are kept in `.cameras.json` on this PC (`SMARTCATTLE_CAMERAS_FILE`, ignored by git), so added cameras return after a restart. The backend's database gets the address without credentials (`PUT /api/ai/cameras/{id}/source`), never the password.
+
+**Who may change cameras.** On a PC or a LAN, `POST`, `DELETE` and `/cameras/scan` answer only the origins in `SMARTCATTLE_LIVE_ORIGINS`. With `--tunnel` or a public `--public-url`, `Origin` proves nothing, so they also need a signed-in dashboard session, which `live.py` checks against the backend (`GET /api/auth/me`). Without `SMARTCATTLE_BACKEND_URL` they are refused. The video itself has no login in any of these setups.
+
+**Where each deployment can reach.** `live.py` opens the camera itself, so it only reaches what its own machine reaches:
+
+| `live.py` runs on | Cameras it can add |
+| --- | --- |
+| A PC in the camera's network, optionally with `--tunnel` | Private addresses (`192.168.x.x`), webcams, public addresses |
+| Render (`SMARTCATTLE_CLOUD=1`) | Public addresses only, such as a router's forwarded port. Private addresses get a clear error |
+
+On Render the disk is erased on each deploy, so `.cameras.json` does not survive one: added cameras must be added again unless the service has a persistent disk (`SMARTCATTLE_CAMERAS_FILE=/var/data/cameras.json`).
+
+### Using it from anywhere
+
+The dashboard and the backend live on the internet, and each farm has one PC running this service, because only something on the farm's network can open its cameras. The PC opens a tunnel outwards, so no router needs configuring and no one needs to be on the farm's wifi to watch.
+
+1. On the farm's PC, unzip this repository and double click `Iniciar SmartCattle.bat`. It installs what is missing; the first time takes several minutes.
+2. Sign in on the dashboard, open **Cameras** and press **Mostrar código**. Type the code into the PC's window. This happens once.
+3. From then on the Cameras page searches and connects through that PC, wherever you open it from. The PC restarts the service if it stops, starts with Windows, and brings the tunnel back if it drops, reporting the new address to the backend.
+
+Each PC gets its own key, valid only for the cameras of its account. If the PC is off or has no internet, the page says so.
+
+The quick tunnel is free and needs no account, but Cloudflare gives no uptime guarantee for it, so it fits a few people rather than a commercial service.
+
+### Installing it at a farm
+
+The system works with the cameras of whoever installs it, on their own network:
+
+1. Copy the three repositories to the farm's PC, without this PC's `.env` or `.cameras.json`: those hold another site's camera.
+2. Fill in `.env` from `.env.example`. No camera setting is needed.
+3. Run `scripts\start_local.ps1`. It opens the Cameras page.
+4. Create an account: it starts empty, and it is theirs.
+5. On the Cameras page, search the network or scan the QR with a phone, save the camera and press Connect.
+
+The PC must be on the same network as the cameras, because the AI service is what opens them.
+
+### Opening the dashboard from another device
+
+Same Wi-Fi: run the three services on every interface, and open `http://<this PC's IP>:5173`.
+
+```powershell
+python live.py --host 0.0.0.0                          # reports http://<this PC's IP>:8090 and allows that origin
+uvicorn app.main:app --host 0.0.0.0 --port 8000        # backend; add http://<this PC's IP>:5173 to ALLOWED_ORIGINS
+npm run dev -- --host 0.0.0.0 --port 5173              # frontend
+```
+
+Anyone on that network can then watch `/video.mjpg`, because the video has no login. From another network, use the hosted frontend with `--tunnel`.
+
+### What each cow is doing
+
+Every camera estimates whether each cow is `walking`, `standing` or `lying`, sends it with its box to the dashboard, where the 3D view shows it, and every 30 seconds sends the counts to the backend for the daily report. The detector only knows "cow", so `smartcattle_ai/posture.py` adds the rest:
+
+- **Walking:** the middle of the box moves at least 0.15 body lengths per second.
+- **Lying or standing:** a small classifier (`models/cattle_posture_cls.pt`, about 15 ms per animal on CPU) looks at each animal every two seconds, and the most common of its last five sure answers decides. Lying also requires having held the spot for five seconds.
+- **Without the classifier, or while it is unsure:** the box's shape decides: at least twice as wide as tall, or falling to 72 % of its recent height with the feet in the same place.
+- A change must hold for two seconds. An animal cut off by the edge of the picture with no answer yet has no posture, and is counted as unknown.
+
+What it measures, in `reports/posture_evaluation.json`: five folds over 351 labelled animals (128 lying), with every picture wholly on one side.
+
+| Finding cows lying | Found (recall) | Right when it says lying (precision) |
+|---|---|---|
+| Box shape alone, by day | 31 % | 83 % |
+| Whole rule, by day | 89 % | 89 % |
+| Whole rule, simulated night | 83 % | 89 % |
+
+Those rows are the 254 animals (49 lying) of the Open Images set. The other 97 were searched for as resting cattle, and score higher (99 % by day) partly because of that, so they are left out of the table. On two real videos of herds on the move, about 12,000 observations, none was called lying; the classifier alone had called about one in ten so, walking cows with hidden or blurred legs, which is why lying requires stillness. Those videos contain no resting cows, so they say nothing about finding them.
+
+The limits of those numbers: the labels were set by eye by an AI assistant, not a veterinarian. **No real night footage has been measured**: "simulated night" is a day picture made grey, dim and noisy, and a real infrared camera may do worse. Check it on your own camera before relying on it.
+
+Frames in the dark also lose cows: on the test images the detector finds 65 % of them by day and 53 % on simulated night. Brightening the frames (CLAHE, gamma) did not help, so the service does not do it. What it does is keep a weak detection (confidence from 0.15, `SMARTCATTLE_WEAK_CONF`) when it lies on an animal already followed: on simulated night the two test videos then see 25-37 % more cows per frame and hand out 7-22 % fewer numbers, with the count jumping about as much.
+
+To retrain, with the pictures of `data/posture_labels.csv` in `datasets/` (credits in `data/posture_commons_credits.csv`): `python scripts/train_posture.py`, then `python scripts/evaluate_posture_monitor.py`.
+
+### Training on real standing and lying cattle
+
+Better accuracy takes pictures of the herd labelled by a person. A model whose classes are `cow_standing` and `cow_lying` replaces the estimate with no code change:
+
+```powershell
+python scripts/collect_posture_frames.py --source 1 --every 5     # sorts pictures by estimated posture
+# Check every picture, label the boxes in YOLO format, and write datasets/cattle_posture/data.yaml
+python scripts/validate_dataset.py --data datasets/cattle_posture/data.yaml --allowed-classes 0,1
+python scripts/train.py --config configs/train_cattle_posture.yaml --weights-out models/cattle_posture_best.pt
+```
+
+Then set `SMARTCATTLE_WEIGHTS=models/cattle_posture_best.pt`. No such model has been trained yet: it needs those pictures. The separate classifier described above needs no change to the detector.
 
 ### Cloud deployment (Imou Open Platform)
 

@@ -1,5 +1,6 @@
 *
 !requirements.txt
+!constraints.txt
 !live.py
 !smartcattle_ai/
 !models/cattle_coco_yolo11n_best.pt

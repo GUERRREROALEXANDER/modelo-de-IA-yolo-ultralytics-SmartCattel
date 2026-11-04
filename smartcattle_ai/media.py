@@ -45,6 +45,8 @@ def draw_detections(frame: np.ndarray, detections: list[dict], zone=None, gate=N
         label = f'{detection["class"]}{track} {detection["confidence"]:.2f}' + (" OUT" if outside else "")
         if night:
             label += " NIGHT"
+        if detection.get("posture") in ("lying", "walking"):
+            label += f' {detection["posture"].upper()}'
         if still:
             label += f' STILL {int(detection.get("still_for_s", 0) // 60)}m'
         cv2.putText(annotated, label, (x1, max(y1 - 5, 12)),
