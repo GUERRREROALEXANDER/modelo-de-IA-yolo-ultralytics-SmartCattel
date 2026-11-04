@@ -33,10 +33,14 @@ class Settings:
     class_names: tuple[str, ...] = ("cow", "person")
     device: str = field(default_factory=_default_device)
     person_weights: str = "yolo11n.pt"
+    # Detections this weak are never trusted alone, but one on top of an animal already being followed is that animal.
+    weak_confidence: float = 0.15
 
     def __post_init__(self) -> None:
         if not 0 < self.confidence <= 1:
             raise ValueError("confidence must be greater than 0 and at most 1")
+        if not 0 < self.weak_confidence <= 1:
+            raise ValueError("weak_confidence must be greater than 0 and at most 1")
         if not 0 < self.iou <= 1:
             raise ValueError("iou must be greater than 0 and at most 1")
         if self.imgsz < 32 or self.imgsz % 32:
@@ -59,4 +63,5 @@ class Settings:
             class_names=tuple(name.strip() for name in classes.split(",")),
             device=os.getenv("SMARTCATTLE_DEVICE", _default_device()),
             person_weights=os.getenv("SMARTCATTLE_PERSON_WEIGHTS", "yolo11n.pt"),
+            weak_confidence=float(os.getenv("SMARTCATTLE_WEAK_CONF", "0.15")),
         )

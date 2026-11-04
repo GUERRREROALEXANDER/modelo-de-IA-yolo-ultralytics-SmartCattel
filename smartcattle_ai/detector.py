@@ -61,13 +61,23 @@ class Detector:
                                       for class_id in names))
 
     def detect(self, frame: np.ndarray) -> list[dict]:
+        return self._predict(frame, self.settings.confidence)
+
+    def detect_with_weak(self, frame: np.ndarray) -> tuple[list[dict], list[dict]]:
+        """(detections, weak ones): one prediction split in two, so asking for the weak ones costs no second pass."""
+        threshold = self.settings.confidence
+        found = self._predict(frame, min(self.settings.weak_confidence, threshold))
+        return ([item for item in found if item["confidence"] >= threshold],
+                [item for item in found if item["confidence"] < threshold])
+
+    def _predict(self, frame: np.ndarray, confidence: float) -> list[dict]:
         with self._lock:
             self._prepare()
             detections = []
             for model, names in self._routes:
                 result = model.predict(
                     frame,
-                    conf=self.settings.confidence,
+                    conf=confidence,
                     iou=self.settings.iou,
                     imgsz=self.settings.imgsz,
                     classes=list(names),

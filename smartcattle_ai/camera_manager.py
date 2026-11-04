@@ -36,6 +36,11 @@ class SharedDetector:
         with self._lock:
             return self._detector.detect(frame)
 
+    def detect_with_weak(self, frame):
+        with self._lock:
+            split = getattr(self._detector, "detect_with_weak", None)
+            return split(frame) if split is not None else (self._detector.detect(frame), [])
+
 
 @dataclass
 class ManagedCamera:
