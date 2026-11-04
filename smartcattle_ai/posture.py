@@ -1,11 +1,15 @@
 """Whether a cow is walking, standing or lying, estimated from how its box behaves.
 
-The detector only says "cow". This reads the box over time, so it is an estimate and needs no other model; a model
-trained on cow_standing and cow_lying replaces it (see Detector).
+The detector only says "cow". The box over time tells walking apart, and the look of the animal, through a small
+classifier when it is installed, tells standing from lying. Without it, or when it is unsure, the box's shape decides.
+A detector trained on cow_standing and cow_lying replaces all of this (see Detector).
 """
 
-from collections import deque
+import sys
+from collections import Counter, deque
 from dataclasses import dataclass, field
+
+from .posture_classifier import MIN_CONFIDENCE
 
 WALKING = "walking"
 STANDING = "standing"
@@ -31,6 +35,14 @@ FORGET_AFTER_S = 300.0
 WINDOW_S = 60.0
 #: Speed is measured over at least this long: from one frame to the next, jitter looks like movement.
 SPEED_OVER_S = 1.0
+#: A crop this often is plenty: cattle change posture over seconds, and the detector needs the CPU more.
+CLASSIFY_EVERY_S = 2.0
+#: The classifier's latest answers about one animal: one odd picture, a passing shadow, must not outvote the others.
+VOTES = 5
+#: The classifier alone calls a walking cow with hidden or blurred legs "lying" (measured on real herd video). A cow that
+#: lies down stays put, so it must have held this spot this long, within this share of its body, before that is believed.
+LYING_NEEDS_STILL_S = 5.0
+LYING_STILL_BODY_SHARE = 0.25
 
 
 @dataclass
@@ -41,6 +53,8 @@ class _Track:
     standing_height: float | None = None
     candidate: str | None = None
     candidate_since: float = 0.0
+    votes: deque = field(default_factory=lambda: deque(maxlen=VOTES))
+    classified_at: float = float("-inf")
 
 
 def _center(bbox) -> tuple[float, float]:
@@ -48,12 +62,14 @@ def _center(bbox) -> tuple[float, float]:
 
 
 class PostureMonitor:
-    def __init__(self):
+    def __init__(self, classifier=None):
         self._tracks: dict[int, _Track] = {}
+        self._classifier = classifier
 
-    def update(self, detections: list[dict], width: int, height: int, now: float) -> list[dict]:
+    def update(self, detections: list[dict], width: int, height: int, now: float, frame=None) -> list[dict]:
         """The same detections, with "posture" on the cows it can say something about."""
         self._forget_gone(now)
+        self._classify(detections, frame, now)
         result = []
         for item in detections:
             if item["class"] != "cow" or "posture" in item:
@@ -64,15 +80,43 @@ class PostureMonitor:
                 result.append({**item, "posture": LYING} if self._is_flat(item["bbox"]) else item)
                 continue
             if self._is_cut_off(item["bbox"], width, height):
+                # Its shape says nothing, but its look does: half a cow lying down still looks like one.
                 known = self._tracks.get(item["track_id"])
-                result.append({**item, "posture": known.state} if known is not None else item)
-                continue
+                if known is None or not known.votes:
+                    result.append({**item, "posture": known.state} if known is not None and known.samples else item)
+                    continue
             result.append({**item, "posture": self._estimate(item, now)})
         return result
 
+    def _classify(self, detections: list[dict], frame, now: float) -> None:
+        """Adds a vote for each tracked cow that is due for one, all in one batch."""
+        if self._classifier is None or frame is None:
+            return
+        due = []
+        for item in detections:
+            track_id = item.get("track_id")
+            if item["class"] != "cow" or "posture" in item or track_id is None:
+                continue
+            track = self._tracks.setdefault(track_id, _Track())
+            if now - track.classified_at >= CLASSIFY_EVERY_S:
+                track.classified_at = now
+                due.append((track, item["bbox"]))
+        if not due:
+            return
+        try:
+            answers = self._classifier.predict(frame, [bbox for _, bbox in due])
+        except Exception as exc:  # A broken classifier must leave the box's estimate, not skip the frame.
+            print(f"Warning: posture classifier off after {type(exc).__name__}", file=sys.stderr, flush=True)
+            self._classifier = None
+            return
+        for (track, _), (name, confidence) in zip(due, answers):
+            if confidence >= MIN_CONFIDENCE:
+                track.votes.append(LYING if name == LYING else STANDING)
+
     def _forget_gone(self, now: float) -> None:
         """A service left running for months must not keep every animal it ever numbered."""
-        gone = [key for key, track in self._tracks.items() if now - track.samples[-1][0] > FORGET_AFTER_S]
+        gone = [key for key, track in self._tracks.items()
+                if track.samples and now - track.samples[-1][0] > FORGET_AFTER_S]
         for key in gone:
             del self._tracks[key]
 
@@ -90,6 +134,10 @@ class PostureMonitor:
             track.samples.popleft()
         if self._is_walking(track, bbox, now):
             seen = WALKING
+        elif track.votes:
+            seen = Counter(track.votes).most_common(1)[0][0]
+            if seen == LYING and not self._has_stayed(track, bbox, now):
+                seen = STANDING
         else:
             seen = LYING if self._is_flat(bbox) or self._is_down(track, bbox) else STANDING
         if len(track.samples) == 1:
@@ -124,6 +172,18 @@ class PostureMonitor:
         return max(
             (old[3] - old[1] for _, old in track.samples if abs(old[3] - bbox[3]) <= SAME_PLACE * height), default=height,
         )
+
+    @staticmethod
+    def _has_stayed(track: _Track, bbox, now: float) -> bool:
+        if now - track.samples[0][0] < LYING_NEEDS_STILL_S:
+            return False
+        x, y = _center(bbox)
+        reach = LYING_STILL_BODY_SHARE * max(bbox[2] - bbox[0], 1.0)
+        for moment, old in track.samples:
+            old_x, old_y = _center(old)
+            if now - moment <= LYING_NEEDS_STILL_S and ((x - old_x) ** 2 + (y - old_y) ** 2) ** 0.5 > reach:
+                return False
+        return True
 
     @staticmethod
     def _is_flat(bbox) -> bool:
