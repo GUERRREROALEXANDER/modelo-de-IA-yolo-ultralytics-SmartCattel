@@ -100,6 +100,12 @@ class BackendClient:
         """Where the camera is reached, for the database. Callers pass it without credentials."""
         self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/source", {"source": source, "active": active}, "PUT")
 
+    def cloud_cameras(self) -> list[dict]:
+        """The cameras the backend wants open from the cloud: [{camera_id, source}], sources like imou:<serial>."""
+        _, response = self._request("/api/ai/cameras/cloud")
+        items = response.get("items")
+        return items if isinstance(items, list) else []
+
     def camera_zones(self, camera_id: str) -> list[dict]:
         """The camera's active safe zones, as drawn in the dashboard."""
         _, response = self._request(f"/api/ai/cameras/{quote(camera_id, safe='')}/zones")

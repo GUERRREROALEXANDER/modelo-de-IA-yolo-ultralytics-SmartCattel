@@ -20,7 +20,8 @@ from smartcattle_ai.farm import FarmLink, is_farm_key
 from smartcattle_ai.pushed import PUSHED_SOURCE, PushedStream
 from smartcattle_ai.camera_manager import MAX_CAMERAS, CameraManager, ManagedCamera, SharedDetector, is_public_url
 from smartcattle_ai.env import load_env_file
-from smartcattle_ai.imou import imou_configured, imou_url_provider
+from smartcattle_ai.cloud_cameras import start_cloud_cameras
+from smartcattle_ai.imou import imou_configured, imou_provider_for, imou_serial, imou_url_provider
 from smartcattle_ai.discovery import local_ipv4
 from smartcattle_ai.live import (
     DEFAULT_ORIGINS, LatestFrame, LiveState, VisitorLog, capture_worker, detection_log_worker, detection_worker,
@@ -46,6 +47,14 @@ def max_added_cameras(env) -> int:
     """How many cameras the dashboard may add. A server's memory and CPU say how many it can really analyse."""
     value = env.get("SMARTCATTLE_MAX_CAMERAS", "")
     return int(value) if value.isdigit() else MAX_CAMERAS
+
+
+def cloud_cameras_enabled(env) -> bool:
+    """Whether this server opens the dashboard's Imou cameras: it needs the Imou account, and it must be the one
+    server meant to do it (the cloud one, or a PC told so), or two would analyse and report the same camera."""
+    has_account = bool(env.get("IMOU_APP_ID", "").strip() and env.get("IMOU_APP_SECRET", "").strip())
+    chosen = env.get("SMARTCATTLE_CLOUD") == "1" or env.get("SMARTCATTLE_IMOU_SYNC") == "1"
+    return has_account and chosen
 
 
 def main(argv=None) -> int:
@@ -214,9 +223,14 @@ def main(argv=None) -> int:
     def added_stream_url(camera_id):
         return f"{state.public_url}/cameras/{camera_id}"
 
+    def open_source(source):
+        """What the stream opens: an imou:<serial> camera is opened through the Imou cloud."""
+        serial = imou_serial(source)
+        return imou_provider_for(serial) if serial is not None else source
+
     def start_added_camera(camera_id, source):
         camera_stop = Event()
-        camera_state, camera_stream, camera_workers = build_camera(camera_id, source, camera_stop,
+        camera_state, camera_stream, camera_workers = build_camera(camera_id, open_source(source), camera_stop,
                                                                    added_stream_url(camera_id))
         for worker in camera_workers:
             worker.start()
@@ -226,7 +240,7 @@ def main(argv=None) -> int:
     # The list holds camera passwords and only serves to reconnect by itself, so it is kept only when asked for that.
     manager = CameraManager(start_added_camera, added_stream_url, on_remove=on_camera_removed,
                             path=(os.getenv("SMARTCATTLE_CAMERAS_FILE") or ".cameras.json") if args.auto_camera else None,
-                            max_cameras=max_added_cameras(os.environ))
+                            max_cameras=max_added_cameras(os.environ), opener=open_source)
     origins = [origin.strip() for origin in args.origins.split(",") if origin.strip()]
     # Listening on every interface is how other devices get here, so their browsers must be let in too,
     # and they must be told this PC's address: "localhost" would mean their own device.
@@ -280,6 +294,10 @@ def main(argv=None) -> int:
     for worker in workers:
         worker.start()
     manager.restore()
+    if client is not None and cloud_cameras_enabled(os.environ):
+        # The Imou cameras connected in the dashboard, opened from here through the Imou cloud.
+        start_cloud_cameras(client, manager, stop)
+        print("Cloud cameras: following the Imou cameras connected in the dashboard")
     if client is not None and is_farm_key(os.getenv("SMARTCATTLE_API_KEY")):
         def moved_to(new_url):
             # Every camera's link hangs from this address, and the panel reads them from their next report.

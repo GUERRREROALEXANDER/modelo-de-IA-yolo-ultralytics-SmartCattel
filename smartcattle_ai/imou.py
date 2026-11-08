@@ -3,13 +3,18 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
+from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 DEFAULT_API_URL = "https://openapi.easy4ip.com/openapi"
 _STREAM_IDS = {"HD": 0, "SD": 1}
+#: A camera opened through the Imou cloud by its serial number, as the backend saves it: imou:04797CEPSF59DA6.
+IMOU_PREFIX = "imou:"
+_SERIAL = re.compile(r"^[A-Z0-9]{8,32}$")
 
 
 class ImouError(Exception):
@@ -122,6 +127,43 @@ class ImouUrlProvider:
 
     def __str__(self) -> str:
         return f"Imou cloud device {self.device_id} ({self.profile})"
+
+
+def imou_serial(source) -> str | None:
+    """The serial number of an imou:<serial> source; None for any other source."""
+    if not isinstance(source, str) or not source.startswith(IMOU_PREFIX):
+        return None
+    serial = source[len(IMOU_PREFIX):]
+    return serial if _SERIAL.fullmatch(serial) else None
+
+
+_shared: dict = {"client": None, "key": None}
+_shared_lock = Lock()
+
+
+class _LockedProvider(ImouUrlProvider):
+    """Cameras share one client and its token; they ask for their URL one at a time."""
+
+    def __call__(self) -> str:
+        with _shared_lock:
+            return super().__call__()
+
+
+def imou_provider_for(serial: str, env=os.environ) -> ImouUrlProvider:
+    """The live URL provider of one camera of the developer account, sharing a client with the others."""
+    app_id, app_secret = env.get("IMOU_APP_ID", "").strip(), env.get("IMOU_APP_SECRET", "").strip()
+    if not app_id or not app_secret:
+        raise ValueError("This server has no Imou account: set IMOU_APP_ID and IMOU_APP_SECRET")
+    profile = env.get("IMOU_PROFILE", "").strip().upper() or "SD"
+    if profile not in _STREAM_IDS:
+        raise ValueError("IMOU_PROFILE must be HD or SD")
+    base_url = env.get("IMOU_API_URL", "").strip() or DEFAULT_API_URL
+    with _shared_lock:
+        key = (app_id, app_secret, base_url)
+        if _shared["key"] != key:
+            _shared["client"], _shared["key"] = ImouClient(app_id, app_secret, base_url), key
+        client = _shared["client"]
+    return _LockedProvider(client, serial, profile)
 
 
 def imou_url_provider(env=os.environ) -> ImouUrlProvider:

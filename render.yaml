@@ -23,6 +23,12 @@ services:
       # Not on any farm's network: private addresses and webcam numbers get a clear message.
       - key: SMARTCATTLE_CLOUD
         value: "1"
+      # Imou developer account (open.imoulife.com), the same as the backend's. With it this server opens, through the
+      # Imou cloud, every Imou camera connected on the Cameras page, and keeps them open.
+      - key: IMOU_APP_ID
+        sync: false
+      - key: IMOU_APP_SECRET
+        sync: false
       # Smaller input keeps CPU inference near real time on a shared instance.
       - key: SMARTCATTLE_IMGSZ
         value: "416"

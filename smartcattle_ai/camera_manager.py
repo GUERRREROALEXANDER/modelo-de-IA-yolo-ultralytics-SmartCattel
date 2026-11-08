@@ -13,6 +13,7 @@ from threading import Event, Lock, Thread
 from typing import Any
 from urllib.parse import urlsplit
 
+from .imou import imou_serial
 from .pushed import PUSHED_SOURCE
 from .stream import host_and_port, is_device_index
 
@@ -53,7 +54,7 @@ class ManagedCamera:
 
 def check_source(source: str) -> str:
     """A webcam index or a network stream. Anything else (file://, concat:...) would let FFmpeg read this PC."""
-    if is_device_index(source) or source == PUSHED_SOURCE:
+    if is_device_index(source) or source == PUSHED_SOURCE or imou_serial(source) is not None:
         return source
     if urlsplit(source).scheme.lower() not in ALLOWED_SCHEMES:
         raise ValueError("The camera address must be rtsp://, http://, an IP address or a webcam number")
@@ -65,6 +66,8 @@ def check_reachable_from_cloud(source: str, resolve=socket.getaddrinfo) -> str:
     """A cloud server cannot reach a farm's network, and must not be pointed at its own: only internet addresses."""
     message = ("This server runs in the cloud and cannot reach that address. Use the camera's public address, "
                "or run live.py on a PC in the camera's network")
+    if imou_serial(source) is not None:
+        return source  # Opened through the Imou cloud, which any server reaches.
     if is_device_index(source):
         raise ValueError(message)
     host, port = host_and_port(source)
@@ -92,6 +95,9 @@ def camera_id_for(source: str) -> str:
     """Stable for one camera and free of credentials, so retrying with a new password reuses the same entry."""
     if is_device_index(source):
         return f"cam-webcam-{int(source)}"
+    serial = imou_serial(source)
+    if serial is not None:
+        return f"cam-imou-{serial.lower()}"
     host, port = host_and_port(source)
     parts = urlsplit(source)
     # The path separates the channels of a recorder, which share one host and port.
@@ -107,8 +113,11 @@ class CameraManager:
     to `path`; the file holds camera passwords, like .env, and stays on this PC.
     """
 
-    def __init__(self, start, stream_url, on_remove=None, path=None, max_cameras: int = MAX_CAMERAS):
+    def __init__(self, start, stream_url, on_remove=None, path=None, max_cameras: int = MAX_CAMERAS,
+                 opener=None):
         self._start = start
+        # Turns a saved source into what the stream opens: imou:<serial> becomes a provider of its cloud URL.
+        self._opener = opener or (lambda source: source)
         self._stream_url = stream_url
         self._on_remove = on_remove
         self._path = Path(path) if path else None
@@ -138,7 +147,7 @@ class CameraManager:
             camera = self._cameras.get(camera_id)
             if camera is not None:
                 camera.source = source
-                camera.stream.switch(source)
+                camera.stream.switch(self._opener(source))
                 camera.state.set_camera_status("connecting")
             else:
                 if len(self._cameras) >= self._max:
