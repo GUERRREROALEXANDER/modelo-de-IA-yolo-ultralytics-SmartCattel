@@ -1,0 +1,2 @@
+# Windows' cmd expects these line endings, and the farm's copy comes from GitHub's zip.
+*.bat text eol=crlf

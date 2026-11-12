@@ -1,0 +1,161 @@
+{
+  "method": "5-fold cross-validation, whole pictures on one side, last of 15 epochs",
+  "labels": "Labelled by eye from the pictures by an AI assistant, not by a veterinarian",
+  "night": "Simulated: pictures made grey, dim and noisy. No real night footage was measured.",
+  "min_confidence": 0.7,
+  "results": {
+    "all/day/classifier": {
+      "animals": 351,
+      "lying": 128,
+      "recall_lying": 0.938,
+      "precision_lying": 0.938,
+      "accuracy": 0.954
+    },
+    "all/day/shape_only": {
+      "animals": 351,
+      "lying": 128,
+      "recall_lying": 0.445,
+      "precision_lying": 0.95,
+      "accuracy": 0.789
+    },
+    "all/day/shipped": {
+      "animals": 351,
+      "lying": 128,
+      "recall_lying": 0.945,
+      "precision_lying": 0.953,
+      "accuracy": 0.963
+    },
+    "all/night/classifier": {
+      "animals": 351,
+      "lying": 128,
+      "recall_lying": 0.883,
+      "precision_lying": 0.95,
+      "accuracy": 0.94
+    },
+    "all/night/shipped": {
+      "animals": 351,
+      "lying": 128,
+      "recall_lying": 0.859,
+      "precision_lying": 0.957,
+      "accuracy": 0.934
+    },
+    "commons/day/classifier": {
+      "animals": 97,
+      "lying": 79,
+      "recall_lying": 0.987,
+      "precision_lying": 0.987,
+      "accuracy": 0.979
+    },
+    "commons/day/shape_only": {
+      "animals": 97,
+      "lying": 79,
+      "recall_lying": 0.532,
+      "precision_lying": 1.0,
+      "accuracy": 0.619
+    },
+    "commons/day/shipped": {
+      "animals": 97,
+      "lying": 79,
+      "recall_lying": 0.987,
+      "precision_lying": 0.987,
+      "accuracy": 0.979
+    },
+    "commons/night/classifier": {
+      "animals": 97,
+      "lying": 79,
+      "recall_lying": 0.924,
+      "precision_lying": 1.0,
+      "accuracy": 0.938
+    },
+    "commons/night/shipped": {
+      "animals": 97,
+      "lying": 79,
+      "recall_lying": 0.886,
+      "precision_lying": 1.0,
+      "accuracy": 0.907
+    },
+    "open_images/day/classifier": {
+      "animals": 254,
+      "lying": 49,
+      "recall_lying": 0.857,
+      "precision_lying": 0.857,
+      "accuracy": 0.945
+    },
+    "open_images/day/shape_only": {
+      "animals": 254,
+      "lying": 49,
+      "recall_lying": 0.306,
+      "precision_lying": 0.833,
+      "accuracy": 0.854
+    },
+    "open_images/day/shipped": {
+      "animals": 254,
+      "lying": 49,
+      "recall_lying": 0.878,
+      "precision_lying": 0.896,
+      "accuracy": 0.957
+    },
+    "open_images/night/classifier": {
+      "animals": 254,
+      "lying": 49,
+      "recall_lying": 0.816,
+      "precision_lying": 0.87,
+      "accuracy": 0.941
+    },
+    "open_images/night/shipped": {
+      "animals": 254,
+      "lying": 49,
+      "recall_lying": 0.816,
+      "precision_lying": 0.889,
+      "accuracy": 0.945
+    },
+    "all/day/whole_rule": {
+      "animals": 344,
+      "lying": 126,
+      "recall_lying": 0.952,
+      "precision_lying": 0.952,
+      "accuracy": 0.965,
+      "no_answer": 7
+    },
+    "all/night/whole_rule": {
+      "animals": 347,
+      "lying": 126,
+      "recall_lying": 0.873,
+      "precision_lying": 0.957,
+      "accuracy": 0.939,
+      "no_answer": 4
+    },
+    "commons/day/whole_rule": {
+      "animals": 97,
+      "lying": 79,
+      "recall_lying": 0.987,
+      "precision_lying": 0.987,
+      "accuracy": 0.979,
+      "no_answer": 0
+    },
+    "commons/night/whole_rule": {
+      "animals": 96,
+      "lying": 78,
+      "recall_lying": 0.897,
+      "precision_lying": 1.0,
+      "accuracy": 0.917,
+      "no_answer": 1
+    },
+    "open_images/day/whole_rule": {
+      "animals": 247,
+      "lying": 47,
+      "recall_lying": 0.894,
+      "precision_lying": 0.894,
+      "accuracy": 0.96,
+      "no_answer": 7
+    },
+    "open_images/night/whole_rule": {
+      "animals": 251,
+      "lying": 48,
+      "recall_lying": 0.833,
+      "precision_lying": 0.889,
+      "accuracy": 0.948,
+      "no_answer": 3
+    }
+  }
+}

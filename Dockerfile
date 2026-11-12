@@ -8,9 +8,10 @@ RUN apt-get update \
 
 WORKDIR /app
 # CPU-only PyTorch first: the default wheel bundles CUDA and is several GB.
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Exact versions: a redeploy must not pick up a release nobody has tried (constraints.txt).
+RUN pip install --no-cache-dir torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
+COPY requirements.txt constraints.txt ./
+RUN pip install --no-cache-dir -c constraints.txt -r requirements.txt
 
 COPY smartcattle_ai smartcattle_ai
 COPY live.py .
@@ -19,5 +20,7 @@ COPY models/cattle_coco_yolo11n_best.pt models/
 ENV PYTHONUNBUFFERED=1 \
     YOLO_CONFIG_DIR=/tmp/ultralytics \
     SMARTCATTLE_DEVICE=cpu \
+    OMP_NUM_THREADS=1 \
+    MALLOC_ARENA_MAX=2 \
     SMARTCATTLE_LIVE_HOST=0.0.0.0
 CMD ["python", "live.py"]

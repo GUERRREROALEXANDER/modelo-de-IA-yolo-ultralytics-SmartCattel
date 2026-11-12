@@ -3,6 +3,7 @@
 import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit
 
 # Port -> what usually listens there. 554 is RTSP (Imou/Dahua, Hikvision, most IP cameras); the others are
 # the phone apps the README suggests (IP Webcam on 8080, DroidCam on 4747).
@@ -28,6 +29,21 @@ def _open(host: str, port: int, timeout_s: float) -> bool:
             return True
     except OSError:
         return False
+
+
+def no_answer(source: str, timeout_s: float = 2.0, probe=_open, own_address: str | None = None) -> str | None:
+    """Why nothing can answer at this address, or None. Opening a stream takes far longer to say the same.
+
+    Only the host and port go in the text: the source may hold the camera's password.
+    """
+    parts = urlsplit(source)
+    default_port = {"rtsp": 554, "http": 80, "https": 443}.get(parts.scheme)
+    if default_port is None or not parts.hostname:
+        return None  # A webcam number, or something only the video library knows how to open.
+    port = parts.port or default_port
+    if probe(parts.hostname, port, timeout_s):
+        return None
+    return f"No answer from {parts.hostname}:{port} (this PC is {own_address or local_ipv4() or 'unknown'})"
 
 
 def scan_cameras(own_address: str | None = None, timeout_s: float = 0.35, workers: int = 96,

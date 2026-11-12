@@ -3,6 +3,7 @@ __pycache__/
 models/*.pt
 # The deployed checkpoint (5.5 MB): cloud builds start from the repository.
 !models/cattle_coco_yolo11n_best.pt
+!models/cattle_posture_cls.pt
 runs/
 outputs/
 datasets/
@@ -12,3 +13,7 @@ outputs/*.mp4
 venv/
 .uv-cache/
 .env
+# Cameras added from the dashboard, with their passwords.
+.cameras.json
+.cameras.json.tmp
+.venv-farm/

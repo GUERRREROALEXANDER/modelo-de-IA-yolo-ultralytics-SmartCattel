@@ -1,0 +1,16 @@
+# Fine-tunes the detector on standing and lying cattle. It needs labelled pictures of real animals:
+# scripts/collect_posture_frames.py gathers them, and datasets/cattle_posture/data.yaml names the two classes.
+model: yolo11n.pt
+data: datasets/cattle_posture/data.yaml
+epochs: 40
+patience: 10
+imgsz: 640
+batch: 8
+device: cpu
+workers: 4
+seed: 0
+deterministic: true
+optimizer: AdamW
+lr0: 0.0005
+warmup_epochs: 1
+freeze: 10

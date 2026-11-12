@@ -16,6 +16,15 @@ def iou(a, b) -> float:
     return overlap / union if union > 0 else 0.0
 
 
+def track_frame(detector, tracker, frame) -> list[dict]:
+    """A frame's tracked detections, keeping followed animals through the frames where they read weak."""
+    split = getattr(detector, "detect_with_weak", None)
+    if split is None:
+        return tracker.update(detector.detect(frame))
+    strong, weak = split(frame)
+    return tracker.update(strong, weak)
+
+
 class IoUTracker:
     def __init__(self, iou_threshold: float = 0.3, max_missed: int = 15):
         if not 0 < iou_threshold <= 1:
@@ -28,24 +37,34 @@ class IoUTracker:
         self._tracks: dict[int, dict] = {}
         self._next_id = 1
 
-    def update(self, detections: list[dict]) -> list[dict]:
-        """The same detections, each with a track_id. Boxes are matched only within their class."""
+    def _match(self, detections: list[dict], taken: set[int]) -> dict[int, int]:
+        """Index of each detection that continues a track, best overlaps first. Adds what it uses to `taken`."""
         candidates = sorted(
             ((iou(track["bbox"], detection["bbox"]), track_id, index)
-             for track_id, track in self._tracks.items()
+             for track_id, track in self._tracks.items() if track_id not in taken
              for index, detection in enumerate(detections)
              if track["class"] == detection["class"]),
             reverse=True,
         )
         assigned: dict[int, int] = {}
-        used_tracks = set()
         for score, track_id, index in candidates:
             if score < self.iou_threshold:
                 break
-            if track_id in used_tracks or index in assigned:
+            if track_id in taken or index in assigned:
                 continue
             assigned[index] = track_id
-            used_tracks.add(track_id)
+            taken.add(track_id)
+        return assigned
+
+    def update(self, detections: list[dict], weak: list[dict] = ()) -> list[dict]:
+        """The same detections, each with a track_id. Boxes are matched only within their class.
+
+        A weak detection continues a track that nothing else claimed and otherwise is dropped: alone it may be a rock,
+        but on top of an animal seen a moment ago it is that animal, in the dark or half hidden.
+        """
+        used_tracks: set[int] = set()
+        assigned = self._match(detections, used_tracks)
+        kept_weak = self._match(list(weak), used_tracks) if weak else {}
 
         result = []
         for index, detection in enumerate(detections):
@@ -53,6 +72,10 @@ class IoUTracker:
             if track_id is None:
                 track_id = self._next_id
                 self._next_id += 1
+            self._tracks[track_id] = {"bbox": detection["bbox"], "class": detection["class"], "missed": 0}
+            result.append({**detection, "track_id": track_id})
+        for index, track_id in kept_weak.items():
+            detection = weak[index]
             self._tracks[track_id] = {"bbox": detection["bbox"], "class": detection["class"], "missed": 0}
             result.append({**detection, "track_id": track_id})
 
